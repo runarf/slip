@@ -7,6 +7,7 @@ const HABITS_KEY = 'habit-tracker-habits'
 const THEME_KEY = 'habit-tracker-theme'
 const REMINDER_KEY = 'habit-tracker-reminder'
 const REMINDER_TIME_KEY = 'habit-tracker-reminder-time'
+const REMINDER_LAST_TRIGGER_KEY = 'habit-tracker-reminder-last-trigger'
 
 interface HabitItem {
   id: string
@@ -119,6 +120,7 @@ function App(): JSX.Element {
   const [shareCopied, setShareCopied] = useState(false)
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteConfirmed, setDeleteConfirmed] = useState(false)
+  const [reminderConfirming, setReminderConfirming] = useState(false)
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem(THEME_KEY)
     return saved ? saved === 'dark' : false
@@ -133,6 +135,10 @@ function App(): JSX.Element {
   })
   const [reminderError, setReminderError] = useState<string>('')
   const [reminderHourMenuOpen, setReminderHourMenuOpen] = useState(false)
+  const [lastReminderTrigger, setLastReminderTrigger] = useState<string | null>(() => {
+    const saved = localStorage.getItem(REMINDER_LAST_TRIGGER_KEY)
+    return saved || null
+  })
 
   const draggedHabitRef = useRef<string | null>(null)
   const dragTargetRef = useRef<string | null>(null)
@@ -200,6 +206,48 @@ function App(): JSX.Element {
   useEffect(() => {
     localStorage.setItem(REMINDER_TIME_KEY, reminderTime)
   }, [reminderTime])
+
+  useEffect(() => {
+    localStorage.setItem(REMINDER_LAST_TRIGGER_KEY, lastReminderTrigger ?? '')
+  }, [lastReminderTrigger])
+
+  useEffect(() => {
+    if (!reminderEnabled || !('Notification' in window)) {
+      return
+    }
+
+    const currentHour = Number.parseInt(reminderTime.split(':')[0], 10)
+    if (Number.isNaN(currentHour)) {
+      return
+    }
+
+    const checkReminder = (): void => {
+      if (Notification.permission !== 'granted' || !reminderEnabled) {
+        return
+      }
+
+      const now = new Date()
+      const todayKey = formatKey(now)
+      const isSameHour = now.getHours() === currentHour
+      const isSameDay = lastReminderTrigger === todayKey
+
+      if (!isSameHour || isSameDay || now.getMinutes() > 1) {
+        return
+      }
+
+      const reminderLabel = activeHabit?.name?.trim() || 'your habit'
+      new Notification('Reminder', {
+        body: `Time to check in on ${reminderLabel}.`,
+      })
+
+      setLastReminderTrigger(todayKey)
+    }
+
+    checkReminder()
+    const intervalId = window.setInterval(checkReminder, 30_000)
+
+    return () => window.clearInterval(intervalId)
+  }, [activeHabit, lastReminderTrigger, reminderEnabled, reminderTime])
 
   useEffect(() => {
     const state = { ...habitStates, [activeHabitId]: { ...activeState, slipDates } }
@@ -416,6 +464,10 @@ function App(): JSX.Element {
     setDeleteConfirming(false)
   }
 
+  const resetReminderConfirmation = (): void => {
+    setReminderConfirming(false)
+  }
+
   const handleDeleteHabit = (): void => {
     if (habits.length <= 1) {
       return
@@ -484,19 +536,42 @@ function App(): JSX.Element {
     if (!('Notification' in window)) {
       setReminderError('Notifications are not available in this browser.')
       setReminderEnabled(false)
+      setReminderConfirming(false)
       return
     }
 
     if (!reminderEnabled) {
-      const permission = await Notification.requestPermission()
-      if (permission !== 'granted') {
+      if (Notification.permission === 'default') {
+        if (!reminderConfirming) {
+          setReminderConfirming(true)
+          return
+        }
+
+        const permission = await Notification.requestPermission()
+        if (permission !== 'granted') {
+          setReminderError('Notification permission was denied. Reminder was not enabled.')
+          setReminderEnabled(false)
+          setReminderConfirming(false)
+          return
+        }
+
+        setReminderError('')
+        setReminderConfirming(false)
+        setReminderEnabled(true)
+        setReminderHourMenuOpen(false)
+        return
+      }
+
+      if (Notification.permission === 'denied') {
         setReminderError('Notification permission was denied. Reminder was not enabled.')
         setReminderEnabled(false)
+        setReminderConfirming(false)
         return
       }
     }
 
     setReminderError('')
+    setReminderConfirming(false)
     setReminderEnabled((current) => !current)
     setReminderHourMenuOpen(false)
   }
@@ -614,10 +689,11 @@ function App(): JSX.Element {
             type="button"
             className="tab-button reminder-toggle"
             onClick={handleReminderToggle}
+            onBlur={resetReminderConfirmation}
             aria-label={reminderEnabled ? 'Hide reminder time' : 'Show reminder time'}
             title={reminderEnabled ? 'Hide reminder time' : 'Show reminder time'}
           >
-            {reminderEnabled ? '🔔' : '🔕'}
+            {reminderConfirming ? 'enable reminder' : reminderEnabled ? '🔔' : '🔕'}
           </button>
 
           {reminderEnabled && (
