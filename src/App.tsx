@@ -132,6 +132,7 @@ function App(): JSX.Element {
     return saved || '20:00'
   })
   const [reminderError, setReminderError] = useState<string>('')
+  const [reminderHourMenuOpen, setReminderHourMenuOpen] = useState(false)
 
   const draggedHabitRef = useRef<string | null>(null)
   const dragTargetRef = useRef<string | null>(null)
@@ -497,6 +498,26 @@ function App(): JSX.Element {
 
     setReminderError('')
     setReminderEnabled((current) => !current)
+    setReminderHourMenuOpen(false)
+  }
+
+  const handleHourSelect = async (hour: string): Promise<void> => {
+    const hourOnlyValue = `${hour}:00`
+    setReminderTime(hourOnlyValue)
+    setReminderHourMenuOpen(false)
+
+    if (!('Notification' in window)) {
+      setReminderEnabled(false)
+      return
+    }
+
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      setReminderEnabled(false)
+      return
+    }
+
+    setReminderEnabled(true)
   }
 
   return (
@@ -600,37 +621,35 @@ function App(): JSX.Element {
           </button>
 
           {reminderEnabled && (
-            <label className="reminder-hour-control" aria-label="Alarm time">
-              <span className="reminder-label">⏰</span>
-              <select
-                ref={reminderHourSelectRef}
-                className="reminder-hour-select"
-                value={reminderTime.slice(0, 2)}
-                onChange={async (event) => {
-                  const nextHour = event.target.value
-                  const hourOnlyValue = `${nextHour}:00`
-                  setReminderTime(hourOnlyValue)
-
-                  if (!('Notification' in window)) {
-                    setReminderEnabled(false)
-                    return
-                  }
-
-                  const permission = await Notification.requestPermission()
-                  if (permission !== 'granted') {
-                    setReminderEnabled(false)
-                    return
-                  }
-
-                  setReminderEnabled(true)
-                }}
-                aria-label="Alarm time"
+            <div className="reminder-hour-control" aria-label="Alarm time">
+              <button
+                type="button"
+                className="reminder-hour-trigger"
+                onClick={() => setReminderHourMenuOpen((current) => !current)}
+                aria-expanded={reminderHourMenuOpen}
+                aria-label="Open alarm time"
+                title="Open alarm time"
               >
-                {reminderHourOptions.map((hour) => (
-                  <option key={hour} value={hour}>{hour}</option>
-                ))}
-              </select>
-            </label>
+                <span className="reminder-label" aria-hidden="true">⏰</span>
+                <span>{reminderTime.slice(0, 2)}</span>
+              </button>
+
+              {reminderHourMenuOpen && (
+                <div className="reminder-hour-menu" role="menu" aria-label="Alarm hour menu">
+                  {reminderHourOptions.map((hour) => (
+                    <button
+                      key={hour}
+                      type="button"
+                      className="reminder-hour-option"
+                      onClick={() => void handleHourSelect(hour)}
+                      role="menuitem"
+                    >
+                      {hour}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {reminderError && <div className="reminder-error">{reminderError}</div>}
