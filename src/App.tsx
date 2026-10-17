@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
-const HABIT_KEY = 'sober-tracker-habit'
-const SLIPS_KEY = 'sober-tracker-slip-dates'
+const HABIT_KEY = 'habit-tracker-habit'
+const SLIPS_KEY = 'habit-tracker-slip-dates'
 
 function formatKey(date: Date): string {
   return date.toISOString().slice(0, 10)
@@ -36,7 +36,7 @@ function getRecentHeatmapDays(): Date[] {
 
 function App(): JSX.Element {
   const [habitWord, setHabitWord] = useState<string>(() => {
-    return localStorage.getItem(HABIT_KEY) ?? 'alcohol'
+    return localStorage.getItem(HABIT_KEY) ?? 'news'
   })
 
   const [slipDates, setSlipDates] = useState<string[]>(() => {
@@ -68,13 +68,13 @@ function App(): JSX.Element {
   }
 
   return (
-    <main className="app-shell" aria-label="Sober tracker">
+    <main className="app-shell" aria-label="Habit tracker">
       <section className="tracker-card">
         <h1>
           No{' '}
           <input
             className="habit-input"
-            aria-label="Alcohol field"
+            aria-label="Habit field"
             value={habitWord}
             onChange={(event) => setHabitWord(event.target.value)}
           />
