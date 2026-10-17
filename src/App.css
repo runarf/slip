@@ -335,7 +335,8 @@ h1 {
   gap: 5px;
 }
 
-.theme-toggle {
+.theme-toggle,
+.reminder-toggle {
   min-width: 32px;
   padding: 7px 9px;
   display: inline-flex;
@@ -345,8 +346,54 @@ h1 {
   line-height: 1;
 }
 
-.theme-toggle:hover {
+.theme-toggle:hover,
+.reminder-toggle:hover {
   transform: translateY(-1px);
+}
+
+.reminder-hour-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(28, 25, 23, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
+.reminder-label {
+  font-size: 0.75rem;
+  opacity: 0.9;
+}
+
+.reminder-hour-select {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.68rem;
+  min-height: 24px;
+  padding: 0;
+  max-width: 72px;
+  outline: none;
+}
+
+.reminder-error {
+  font-size: 0.62rem;
+  line-height: 1.4;
+  color: #b91c1c;
+  margin-top: 4px;
+  max-width: 220px;
+  text-align: center;
+}
+
+.app-shell.dark .reminder-error {
+  color: #fca5a5;
+}
+
+.reminder-time-picker::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.8;
 }
 
 .delete-group {

@@ -5,6 +5,8 @@ const HABIT_KEY = 'habit-tracker-habit'
 const SLIPS_KEY = 'habit-tracker-slip-dates'
 const HABITS_KEY = 'habit-tracker-habits'
 const THEME_KEY = 'habit-tracker-theme'
+const REMINDER_KEY = 'habit-tracker-reminder'
+const REMINDER_TIME_KEY = 'habit-tracker-reminder-time'
 
 interface HabitItem {
   id: string
@@ -121,10 +123,22 @@ function App(): JSX.Element {
     const saved = localStorage.getItem(THEME_KEY)
     return saved ? saved === 'dark' : false
   })
+  const [reminderEnabled, setReminderEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem(REMINDER_KEY)
+    return saved ? saved === 'true' : false
+  })
+  const [reminderTime, setReminderTime] = useState<string>(() => {
+    const saved = localStorage.getItem(REMINDER_TIME_KEY)
+    return saved || '20:00'
+  })
+  const [reminderError, setReminderError] = useState<string>('')
+
   const draggedHabitRef = useRef<string | null>(null)
   const dragTargetRef = useRef<string | null>(null)
   const didDragTabRef = useRef(false)
   const clickWindowRef = useRef<number[]>([])
+  const reminderHourSelectRef = useRef<HTMLSelectElement | null>(null)
+  const reminderHourOptions = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'))
 
   const recentDays = getLastSevenDays()
   const heatmapDays = getRecentHeatmapDays()
@@ -177,6 +191,14 @@ function App(): JSX.Element {
   useEffect(() => {
     localStorage.setItem(THEME_KEY, darkMode ? 'dark' : 'light')
   }, [darkMode])
+
+  useEffect(() => {
+    localStorage.setItem(REMINDER_KEY, String(reminderEnabled))
+  }, [reminderEnabled])
+
+  useEffect(() => {
+    localStorage.setItem(REMINDER_TIME_KEY, reminderTime)
+  }, [reminderTime])
 
   useEffect(() => {
     const state = { ...habitStates, [activeHabitId]: { ...activeState, slipDates } }
@@ -457,6 +479,26 @@ function App(): JSX.Element {
     }
   }
 
+  const handleReminderToggle = async (): Promise<void> => {
+    if (!('Notification' in window)) {
+      setReminderError('Notifications are not available in this browser.')
+      setReminderEnabled(false)
+      return
+    }
+
+    if (!reminderEnabled) {
+      const permission = await Notification.requestPermission()
+      if (permission !== 'granted') {
+        setReminderError('Notification permission was denied. Reminder was not enabled.')
+        setReminderEnabled(false)
+        return
+      }
+    }
+
+    setReminderError('')
+    setReminderEnabled((current) => !current)
+  }
+
   return (
     <main className={`app-shell ${darkMode ? 'dark' : ''}`} aria-label="Habit tracker">
       <div className="emoji-overlay" aria-hidden="true">
@@ -546,6 +588,52 @@ function App(): JSX.Element {
           >
             + add
           </button>
+
+          <button
+            type="button"
+            className="tab-button reminder-toggle"
+            onClick={handleReminderToggle}
+            aria-label={reminderEnabled ? 'Hide reminder time' : 'Show reminder time'}
+            title={reminderEnabled ? 'Hide reminder time' : 'Show reminder time'}
+          >
+            {reminderEnabled ? '🔔' : '🔕'}
+          </button>
+
+          {reminderEnabled && (
+            <label className="reminder-hour-control" aria-label="Alarm time">
+              <span className="reminder-label">⏰</span>
+              <select
+                ref={reminderHourSelectRef}
+                className="reminder-hour-select"
+                value={reminderTime.slice(0, 2)}
+                onChange={async (event) => {
+                  const nextHour = event.target.value
+                  const hourOnlyValue = `${nextHour}:00`
+                  setReminderTime(hourOnlyValue)
+
+                  if (!('Notification' in window)) {
+                    setReminderEnabled(false)
+                    return
+                  }
+
+                  const permission = await Notification.requestPermission()
+                  if (permission !== 'granted') {
+                    setReminderEnabled(false)
+                    return
+                  }
+
+                  setReminderEnabled(true)
+                }}
+                aria-label="Alarm time"
+              >
+                {reminderHourOptions.map((hour) => (
+                  <option key={hour} value={hour}>{hour}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {reminderError && <div className="reminder-error">{reminderError}</div>}
 
           <button
             type="button"
