@@ -14,6 +14,7 @@ interface HabitItem {
 interface HabitState {
   panicLevel: number
   slipDates: string[]
+  moodValues?: Record<string, number>
 }
 
 function formatKey(date: Date): string {
@@ -57,7 +58,10 @@ function App(): JSX.Element {
       }
     }
 
-    return [{ id: 'habit-1', name: 'news' }]
+    return [
+      { id: 'habit-1', name: 'news' },
+      { id: 'habit-mood', name: 'mood' },
+    ]
   })
 
   const [activeHabitId, setActiveHabitId] = useState<string>(() => {
@@ -75,22 +79,36 @@ function App(): JSX.Element {
     const fallbackState: HabitState = {
       panicLevel: 0,
       slipDates: getLastSevenDays().map((date) => formatKey(date)),
+      moodValues: {},
     }
 
     if (!saved) {
-      return { 'habit-1': fallbackState }
+      return {
+        'habit-1': fallbackState,
+        'habit-mood': { ...fallbackState },
+      }
     }
 
     try {
       const parsed = JSON.parse(saved) as Record<string, HabitState>
       if (parsed && parsed['habit-1']) {
-        return parsed
+        return {
+          ...parsed,
+          'habit-mood': {
+            panicLevel: parsed['habit-mood']?.panicLevel ?? 0,
+            slipDates: parsed['habit-mood']?.slipDates ?? getLastSevenDays().map((date) => formatKey(date)),
+            moodValues: parsed['habit-mood']?.moodValues ?? {},
+          },
+        }
       }
     } catch {
       // ignore invalid data and fall back below
     }
 
-    return { 'habit-1': fallbackState }
+    return {
+      'habit-1': fallbackState,
+      'habit-mood': { ...fallbackState },
+    }
   })
 
   const [bursts, setBursts] = useState<Array<{ id: number; x: number; emoji: string }>>([])
@@ -111,9 +129,42 @@ function App(): JSX.Element {
   const recentDays = getLastSevenDays()
   const heatmapDays = getRecentHeatmapDays()
   const activeHabit = habits.find((habit) => habit.id === activeHabitId) ?? habits[0]
-  const activeState = habitStates[activeHabitId] ?? { panicLevel: 0, slipDates: getLastSevenDays().map((date) => formatKey(date)) }
+  const activeState = habitStates[activeHabitId] ?? { panicLevel: 0, slipDates: getLastSevenDays().map((date) => formatKey(date)), moodValues: {} }
   const panicLevel = activeState.panicLevel
   const slipDates = activeState.slipDates
+  const isMoodTab = activeHabitId === 'habit-mood'
+  const moodOptions = [
+    { value: 1, emoji: '😞', label: 'Awful' },
+    { value: 2, emoji: '😕', label: 'Low' },
+    { value: 3, emoji: '🙂', label: 'Okay' },
+    { value: 4, emoji: '😊', label: 'Good' },
+    { value: 5, emoji: '😄', label: 'Great' },
+  ]
+
+  useEffect(() => {
+    setHabits((current) => {
+      const hasMoodTab = current.some((habit) => habit.id === 'habit-mood')
+      if (hasMoodTab) {
+        return current
+      }
+
+      return [...current, { id: 'habit-mood', name: 'mood' }]
+    })
+
+    setHabitStates((current) => {
+      if (current['habit-mood']) {
+        return current
+      }
+
+      return {
+        ...current,
+        'habit-mood': {
+          panicLevel: 0,
+          slipDates: getLastSevenDays().map((date) => formatKey(date)),
+        },
+      }
+    })
+  }, [])
 
   useEffect(() => {
     localStorage.setItem(HABITS_KEY, JSON.stringify(habits))
@@ -172,6 +223,21 @@ function App(): JSX.Element {
 
   const isSlipDay = (date: Date): boolean => {
     return slipDates.includes(formatKey(date))
+  }
+
+  const setMoodValue = (moodValue: number): void => {
+    const todayKey = formatKey(new Date())
+
+    setHabitStates((current) => ({
+      ...current,
+      'habit-mood': {
+        ...(current['habit-mood'] ?? { panicLevel: 0, slipDates: [], moodValues: {} }),
+        moodValues: {
+          ...(current['habit-mood']?.moodValues ?? {}),
+          [todayKey]: moodValue,
+        },
+      },
+    }))
   }
 
   const triggerPanic = (): void => {
@@ -263,6 +329,9 @@ function App(): JSX.Element {
     panicLevel < 42 ? 3 :
     panicLevel < 52 ? 4 :
     5
+
+  const moodState = habitStates['habit-mood'] ?? { panicLevel: 0, slipDates: [], moodValues: {} }
+  const todayMood = moodState.moodValues?.[formatKey(new Date())] ?? null
 
   const reorderHabits = (sourceId: string, targetId: string): void => {
     if (sourceId === targetId) {
@@ -411,6 +480,23 @@ function App(): JSX.Element {
       </div>
 
       <section className="tracker-card">
+        <div className="mood-panel compact top-mood-panel">
+          <div className="mood-scale" aria-label="Mood selection">
+            {moodOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`mood-button ${todayMood === option.value ? 'selected' : ''}`}
+                onClick={() => setMoodValue(option.value)}
+                aria-label={`Mood ${option.label}`}
+                title={option.label}
+              >
+                <span className="mood-emoji">{option.emoji}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="tab-bar" aria-label="Habit tabs">
           {habits.map((habit) => (
             <button
@@ -451,6 +537,7 @@ function App(): JSX.Element {
                 [newHabit.id]: {
                   panicLevel: 0,
                   slipDates: getLastSevenDays().map((date) => formatKey(date)),
+                  moodValues: {},
                 },
               }))
             }}
@@ -469,103 +556,136 @@ function App(): JSX.Element {
           </button>
         </div>
 
-        <div className="habit-header">
-          <h1>
-            No{' '}
-            <input
-              className="habit-input"
-              aria-label="Habit field"
-              value={activeHabit?.name ?? ''}
-              onChange={(event) => {
-                const nextValue = event.target.value || 'habit'
-                setHabits((current) => current.map((habit) =>
-                  habit.id === activeHabitId ? { ...habit, name: nextValue } : habit,
-                ))
-              }}
-            />
-          </h1>
+        {isMoodTab ? (
+          <div className="mood-panel">
+            <div className="mood-header">
+              <h1></h1>
+            </div>
 
-          <div className="share-group">
-            <button
-              type="button"
-              className="share-button"
-              onClick={handleShareHabit}
-              aria-label="Copy habit status to clipboard"
-              title="Copy habit status"
-            >
-              ↗
-            </button>
-            {shareCopied && <span className="share-confirmation">copied to clipboard</span>}
+            <div className="heatmap-wrap mood-heatmap" aria-label="Mood history heatmap">
+              <div className="heatmap-labels">
+                <span>Past 90 days</span>
+              </div>
+              <div className="heatmap-grid">
+                {heatmapDays.map((date) => {
+                  const value = moodState.moodValues?.[formatKey(date)] ?? null
+                  const moodLabel = value ? moodOptions.find((option) => option.value === value)?.label : 'No mood'
+                  const title = `${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${value ? moodLabel : 'no mood'}`
+
+                  return (
+                    <button
+                      key={formatKey(date)}
+                      type="button"
+                      className={`heat-cell ${value ? `mood-${value}` : 'mood-empty'}`}
+                      aria-label={title}
+                      title={title}
+                    />
+                  )
+                })}
+              </div>
+            </div>
           </div>
-
-          <div className="delete-group">
-            <button
-              type="button"
-              className={`delete-habit-button ${deleteConfirming ? 'confirming' : ''}`}
-              onClick={handleDeleteHabit}
-              onBlur={resetDeleteConfirmation}
-              disabled={habits.length <= 1}
-              aria-label="Delete current habit"
-            >
-              {deleteConfirming ? <>🗑 sure?</> : '🗑'}
-            </button>
-            {deleteConfirmed && <span className="delete-confirmation">deleted</span>}
-          </div>
-        </div>
-
-        <button type="button" className={`panic-button panic-${panicStage}`} onClick={triggerPanic}>
-          Panic button
-        </button>
-
-        <div className="week-view" aria-label="Last 7 days calendar">
-          <div className="week-grid">
-            {recentDays.map((date) => {
-              const slipped = isSlipDay(date)
-              const dateLabel = date.toLocaleDateString(undefined, {
-                weekday: 'short',
-                month: 'short',
-                day: 'numeric',
-              })
-
-              return (
-                <button
-                  key={formatKey(date)}
-                  type="button"
-                  className={`week-day ${slipped ? 'slipped' : ''}`}
-                  onClick={() => toggleSlip(date)}
-                  aria-label={`${dateLabel} ${slipped ? 'slipped' : 'no slip'}`}
-                >
-                  <span className="day-name">{date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
-                  <span className="day-number">{date.getDate()}</span>
-                  <span className="day-status">{slipped ? 'slipped' : 'clean'}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="heatmap-wrap" aria-label="Recent activity heatmap">
-          <div className="heatmap-labels">
-            <span>Past 90 days</span>
-          </div>
-          <div className="heatmap-grid">
-            {heatmapDays.map((date) => {
-              const slipped = isSlipDay(date)
-              const hoverText = `${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${slipped ? 'slipped' : 'clean'}`
-
-              return (
-                <button
-                  key={formatKey(date)}
-                  type="button"
-                  className={`heat-cell ${slipped ? 'slipped' : 'clean'}`}
-                  onClick={() => toggleSlip(date)}
-                  aria-label={hoverText}
-                  title={hoverText}
+        ) : (
+          <>
+            <div className="habit-header">
+              <h1>
+                No{' '}
+                <input
+                  className="habit-input"
+                  aria-label="Habit field"
+                  value={activeHabit?.name ?? ''}
+                  onChange={(event) => {
+                    const nextValue = event.target.value || 'habit'
+                    setHabits((current) => current.map((habit) =>
+                      habit.id === activeHabitId ? { ...habit, name: nextValue } : habit,
+                    ))
+                  }}
                 />
-              )
-            })}
-          </div>
-        </div>
+              </h1>
+
+              <div className="share-group">
+                <button
+                  type="button"
+                  className="share-button"
+                  onClick={handleShareHabit}
+                  aria-label="Copy habit status to clipboard"
+                  title="Copy habit status"
+                >
+                  ↗
+                </button>
+                {shareCopied && <span className="share-confirmation">copied to clipboard</span>}
+              </div>
+
+              <div className="delete-group">
+                <button
+                  type="button"
+                  className={`delete-habit-button ${deleteConfirming ? 'confirming' : ''}`}
+                  onClick={handleDeleteHabit}
+                  onBlur={resetDeleteConfirmation}
+                  disabled={habits.length <= 1}
+                  aria-label="Delete current habit"
+                >
+                  {deleteConfirming ? <>🗑 sure?</> : '🗑'}
+                </button>
+                {deleteConfirmed && <span className="delete-confirmation">deleted</span>}
+              </div>
+            </div>
+
+            <button type="button" className={`panic-button panic-${panicStage}`} onClick={triggerPanic}>
+              Panic button
+            </button>
+
+            <div className="week-view" aria-label="Last 7 days calendar">
+              <div className="week-grid">
+                {recentDays.map((date) => {
+                  const slipped = isSlipDay(date)
+                  const dateLabel = date.toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                  })
+
+                  return (
+                    <button
+                      key={formatKey(date)}
+                      type="button"
+                      className={`week-day ${slipped ? 'slipped' : ''}`}
+                      onClick={() => toggleSlip(date)}
+                      aria-label={`${dateLabel} ${slipped ? 'slipped' : 'no slip'}`}
+                    >
+                      <span className="day-name">{date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+                      <span className="day-number">{date.getDate()}</span>
+                      <span className="day-status">{slipped ? 'slipped' : 'clean'}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="heatmap-wrap" aria-label="Recent activity heatmap">
+              <div className="heatmap-labels">
+                <span>Past 90 days</span>
+              </div>
+              <div className="heatmap-grid">
+                {heatmapDays.map((date) => {
+                  const slipped = isSlipDay(date)
+                  const hoverText = `${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${slipped ? 'slipped' : 'clean'}`
+
+                  return (
+                    <button
+                      key={formatKey(date)}
+                      type="button"
+                      className={`heat-cell ${slipped ? 'slipped' : 'clean'}`}
+                      onClick={() => toggleSlip(date)}
+                      aria-label={hoverText}
+                      title={hoverText}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+          </>
+        )}
       </section>
     </main>
   )

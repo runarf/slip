@@ -229,6 +229,106 @@ h1 {
   gap: 4px;
 }
 
+.mood-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 0 2px;
+}
+
+.mood-panel.compact {
+  margin-bottom: 14px;
+}
+
+.top-mood-panel {
+  margin-top: 2px;
+  margin-bottom: 10px;
+  padding-top: 4px;
+}
+
+.mood-header {
+  text-align: center;
+}
+
+.mood-header h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 6vw, 2.2rem);
+}
+
+.mood-subtitle {
+  margin: 6px 0 0;
+  color: #6d6a66;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.app-shell.dark .mood-subtitle {
+  color: #cbd5e1;
+}
+
+.mood-scale {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mood-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #e4e1db;
+  border-radius: 14px;
+  background: #faf9f7;
+  color: #1d1d1b;
+  min-height: 94px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mood-button.selected {
+  background: #1d1d1b;
+  border-color: #1d1d1b;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.app-shell.dark .mood-button {
+  background: #17212d;
+  border-color: #2d3a49;
+  color: #edf2f7;
+}
+
+.app-shell.dark .mood-button.selected {
+  background: #edf2f7;
+  border-color: #edf2f7;
+  color: #111827;
+}
+
+.mood-emoji {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.mood-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mood-summary {
+  text-align: center;
+  font-size: 0.8rem;
+  color: #6d6a66;
+}
+
+.app-shell.dark .mood-summary {
+  color: #cbd5e1;
+}
+
 .share-group {
   display: inline-flex;
   align-items: center;
@@ -451,6 +551,10 @@ h1 {
   padding: 10px;
 }
 
+.mood-heatmap {
+  margin-top: 12px;
+}
+
 .app-shell.dark .heatmap-wrap {
   background: #17212d;
   border-color: #2d3a49;
@@ -497,4 +601,38 @@ h1 {
 .heat-cell.slipped {
   background: #1d1d1b;
   border-color: #1d1d1b;
+}
+
+.heat-cell.mood-empty {
+  background: #f1efe9;
+}
+
+.app-shell.dark .heat-cell.mood-empty {
+  background: #233143;
+  border-color: #2d3a49;
+}
+
+.heat-cell.mood-1 {
+  background: #7f1d1d;
+  border-color: #7f1d1d;
+}
+
+.heat-cell.mood-2 {
+  background: #c2410c;
+  border-color: #c2410c;
+}
+
+.heat-cell.mood-3 {
+  background: #eab308;
+  border-color: #eab308;
+}
+
+.heat-cell.mood-4 {
+  background: #22c55e;
+  border-color: #22c55e;
+}
+
+.heat-cell.mood-5 {
+  background: #15803d;
+  border-color: #15803d;
 }
