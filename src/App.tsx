@@ -343,11 +343,27 @@ function App(): JSX.Element {
     const shareText = `${habitName}: ${statusLine} Slip count in the last 7 days: ${slipCount}.`
 
     try {
-      await navigator.clipboard.writeText(shareText)
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Slip tracker',
+          text: shareText,
+        })
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(shareText)
+      }
+
       setShareCopied(true)
       window.setTimeout(() => setShareCopied(false), 1200)
     } catch {
-      // ignore clipboard failures in unsupported browsers
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(shareText)
+          setShareCopied(true)
+          window.setTimeout(() => setShareCopied(false), 1200)
+        }
+      } catch {
+        // ignore clipboard failures in unsupported browsers
+      }
     }
   }
 
