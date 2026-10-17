@@ -4,7 +4,7 @@
   display: grid;
   place-items: center;
   background: #f5f5f3;
-  padding: 24px;
+  padding: 12px;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -28,6 +28,29 @@
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.25);
 }
 
+.floating-text {
+  position: absolute;
+  bottom: 18%;
+  transform: translate(-50%, 0) scale(0.8);
+  font-size: clamp(0.9rem, 2vw, 1.8rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0;
+  animation: text-pop 0.9s ease-out forwards;
+  pointer-events: none;
+}
+
+.floating-text.dark {
+  color: #b51d1d;
+  text-shadow: 0 0 12px rgba(181, 29, 29, 0.5);
+}
+
+.floating-text.positive {
+  color: #1c9d4a;
+  text-shadow: 0 0 12px rgba(28, 157, 74, 0.5);
+}
+
 @keyframes emoji-pop {
   0% {
     opacity: 0;
@@ -46,25 +69,83 @@
   }
 }
 
+@keyframes text-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.7);
+  }
+  20% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 1;
+    transform: translate(-50%, -120px) scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -220px) scale(1.2);
+  }
+}
+
 .tracker-card {
   width: min(100%, 720px);
   background: #ffffff;
   border: 1px solid #e4e1db;
-  border-radius: 24px;
-  padding: 28px 24px;
+  border-radius: 22px;
+  padding: 18px 14px 16px;
   box-shadow: 0 10px 30px rgba(22, 24, 28, 0.06);
 }
 
 h1 {
-  margin: 12px 0 20px;
-  font-size: clamp(1.8rem, 4vw, 2.3rem);
+  margin: 10px 0 18px;
+  font-size: clamp(1.5rem, 8vw, 2.2rem);
   line-height: 1.1;
   color: #1d1d1b;
   text-align: center;
 }
 
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+  align-items: center;
+}
+
+.tab-button {
+  border: 1px solid #d9d4ce;
+  background: #f7f5f2;
+  color: #3a3835;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: grab;
+  transition: all 0.15s ease;
+}
+
+.tab-button:active {
+  cursor: grabbing;
+}
+
+.tab-button.dragging {
+  opacity: 0.5;
+  transform: scale(0.98);
+}
+
+.tab-button.active {
+  background: #1d1d1b;
+  border-color: #1d1d1b;
+  color: #fff;
+}
+
+.tab-button.add-button {
+  background: #efeae5;
+}
+
 .habit-input {
-  width: 9ch;
+  width: 8.5ch;
   min-width: 4ch;
   border: 1px solid rgba(29, 29, 27, 0.2);
   border-radius: 7px;
@@ -73,7 +154,7 @@ h1 {
   font: inherit;
   font-weight: 600;
   text-align: center;
-  padding: 3px 7px;
+  padding: 3px 6px;
   margin: 0 0 0 4px;
   outline: none;
   cursor: text;
@@ -93,17 +174,17 @@ h1 {
 
 .panic-button {
   display: block;
-  margin: 0 auto 20px;
+  margin: 0 auto 18px;
   border: 2px solid rgba(255, 255, 255, 0.7);
   border-radius: 999px;
   background: #b10d13;
   color: #fff7f7;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 12px 18px;
+  padding: 11px 16px;
   cursor: pointer;
   box-shadow: 0 10px 24px rgba(177, 13, 19, 0.35);
   transition: transform 0.15s ease, opacity 0.15s ease, filter 0.15s ease, background 0.2s ease, box-shadow 0.2s ease;
@@ -147,18 +228,18 @@ h1 {
 .week-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .week-day {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   border: 1px solid #e4e1db;
-  border-radius: 14px;
+  border-radius: 12px;
   background: #faf9f7;
-  padding: 14px 8px;
+  padding: 10px 6px;
   cursor: pointer;
   color: #1d1d1b;
   transition: all 0.15s ease;
@@ -181,17 +262,17 @@ h1 {
 }
 
 .day-number {
-  font-size: 1.8rem;
+  font-size: 1.35rem;
   line-height: 1;
   font-weight: 700;
 }
 
 .heatmap-wrap {
-  margin-top: 20px;
+  margin-top: 16px;
   background: #faf9f7;
   border: 1px solid #e4e1db;
-  border-radius: 14px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 10px;
 }
 
 .heatmap-labels {
@@ -205,7 +286,7 @@ h1 {
 .heatmap-grid {
   display: grid;
   grid-template-columns: repeat(15, minmax(0, 1fr));
-  gap: 4px;
+  gap: 3px;
 }
 
 .heat-cell {
