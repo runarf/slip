@@ -429,9 +429,11 @@ function App(): JSX.Element {
         : `${habitName} is rough right now and I need a reset.`
 
     const shareText = `${habitName}: ${statusLine} Slip count in the last 7 days: ${slipCount}.`
+    const userAgent = navigator.userAgent || ''
+    const isDesktopWindows = /Windows/i.test(userAgent) && !/Mobile|Android|iPhone|iPad/i.test(userAgent)
 
     try {
-      if (navigator.share) {
+      if (navigator.share && !isDesktopWindows) {
         await navigator.share({
           title: 'Slip tracker',
           text: shareText,
