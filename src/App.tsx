@@ -132,6 +132,25 @@ function App(): JSX.Element {
     localStorage.setItem(SLIPS_KEY, JSON.stringify(state))
   }, [activeHabitId, habitStates, slipDates, activeState])
 
+  useEffect(() => {
+    if (panicLevel <= 0) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      clickWindowRef.current = []
+      setHabitStates((current) => ({
+        ...current,
+        [activeHabitId]: {
+          ...(current[activeHabitId] ?? { panicLevel: 0, slipDates: [] }),
+          panicLevel: 0,
+        },
+      }))
+    }, 3500)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [activeHabitId, panicLevel])
+
   const toggleSlip = (date: Date): void => {
     const key = formatKey(date)
 
