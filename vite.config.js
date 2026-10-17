@@ -20,7 +20,7 @@ export default defineConfig({
         scope: './',
         icons: [
           {
-            src: '/favicon.svg',
+            src: './favicon.svg',
             sizes: 'any',
             type: 'image/svg+xml',
             purpose: 'any maskable',
