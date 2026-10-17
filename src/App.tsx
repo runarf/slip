@@ -12,7 +12,7 @@ function getLastSevenDays(): Date[] {
   const days: Date[] = []
   const today = new Date()
 
-  for (let i = 7; i >= 1; i -= 1) {
+  for (let i = 6; i >= 0; i -= 1) {
     const date = new Date(today)
     date.setDate(today.getDate() - i)
     days.push(date)
@@ -41,7 +41,12 @@ function App(): JSX.Element {
 
   const [slipDates, setSlipDates] = useState<string[]>(() => {
     const saved = localStorage.getItem(SLIPS_KEY)
-    return saved ? JSON.parse(saved) : []
+
+    if (saved) {
+      return JSON.parse(saved)
+    }
+
+    return getLastSevenDays().map((date) => formatKey(date))
   })
 
   const recentDays = getLastSevenDays()
@@ -58,9 +63,13 @@ function App(): JSX.Element {
   const toggleSlip = (date: Date): void => {
     const key = formatKey(date)
 
-    setSlipDates((current) =>
-      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
-    )
+    setSlipDates((current) => {
+      if (current.includes(key)) {
+        return current.filter((item) => item !== key)
+      }
+
+      return [...current, key]
+    })
   }
 
   const isSlipDay = (date: Date): boolean => {
