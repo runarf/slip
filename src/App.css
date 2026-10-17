@@ -410,6 +410,17 @@ h1 {
   color: #edf2f7;
 }
 
+.app-shell.dark .week-day:not(.slipped) {
+  background: #1d2a38;
+  border-color: #31445d;
+}
+
+.app-shell.dark .week-day.slipped {
+  background: #3d1015;
+  border-color: #7a1d26;
+  color: #fff1f2;
+}
+
 .week-day:hover {
   transform: translateY(-1px);
 }
@@ -474,8 +485,9 @@ h1 {
   border: 1px solid #e4e1db;
   border-radius: 5px;
   padding: 0;
-  cursor: pointer;
+  cursor: default;
   background: #ffffff;
+  pointer-events: none;
 }
 
 .heat-cell.clean {
