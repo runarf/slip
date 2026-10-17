@@ -4,6 +4,7 @@ import './App.css'
 const HABIT_KEY = 'habit-tracker-habit'
 const SLIPS_KEY = 'habit-tracker-slip-dates'
 const HABITS_KEY = 'habit-tracker-habits'
+const THEME_KEY = 'habit-tracker-theme'
 
 interface HabitItem {
   id: string
@@ -95,6 +96,16 @@ function App(): JSX.Element {
   const [bursts, setBursts] = useState<Array<{ id: number; x: number; emoji: string }>>([])
   const [floatingText, setFloatingText] = useState<Array<{ id: number; x: number; text: string; tone: 'dark' | 'positive' }>>([])
   const [draggedHabitId, setDraggedHabitId] = useState<string | null>(null)
+  const [shareCopied, setShareCopied] = useState(false)
+  const [deleteConfirming, setDeleteConfirming] = useState(false)
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false)
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem(THEME_KEY)
+    return saved ? saved === 'dark' : false
+  })
+  const draggedHabitRef = useRef<string | null>(null)
+  const dragTargetRef = useRef<string | null>(null)
+  const didDragTabRef = useRef(false)
   const clickWindowRef = useRef<number[]>([])
 
   const recentDays = getLastSevenDays()
@@ -111,6 +122,10 @@ function App(): JSX.Element {
   useEffect(() => {
     localStorage.setItem(HABIT_KEY, activeHabitId)
   }, [activeHabitId])
+
+  useEffect(() => {
+    localStorage.setItem(THEME_KEY, darkMode ? 'dark' : 'light')
+  }, [darkMode])
 
   useEffect(() => {
     const state = { ...habitStates, [activeHabitId]: { ...activeState, slipDates } }
@@ -175,17 +190,33 @@ function App(): JSX.Element {
       emoji: chosenPool[Math.floor(Math.random() * chosenPool.length)],
     }
 
-    const darkWords = ['broken', 'numb', 'shaken', 'lost', 'failing', 'sick', 'drained', 'collapse']
-    const neutralWords = ['wobbling', 'hanging on', 'uncertain', 'messy', 'trembling', 'strained', 'wary', 'contesting']
-    const positiveWords = ['healing', 'steady', 'strong', 'clean', 'rise', 'grounded', 'calm', 'winning']
+    const darkWords = ['broken', 'shaken', 'numb', 'lost', 'drained', 'sick', 'falling', 'rough']
+    const neutralWords = ['wobbly', 'unclear', 'tiring', 'strained', 'messy', 'shaky', 'uneasy', 'fragile']
+    const positiveWords = ['steady', 'calm', 'strong', 'healing', 'clear', 'grounded', 'winning', 'clean']
 
     let text = darkWords[Math.floor(Math.random() * darkWords.length)]
     let tone: 'dark' | 'positive' = 'dark'
 
-    if (limitedLevel >= 18 && limitedLevel < 38) {
-      text = neutralWords[Math.floor(Math.random() * neutralWords.length)]
+    if (limitedLevel < 14) {
+      text = darkWords[Math.floor(Math.random() * darkWords.length)]
       tone = 'dark'
-    } else if (limitedLevel >= 38) {
+    } else if (limitedLevel < 28) {
+      if (Math.random() < 0.35) {
+        text = positiveWords[Math.floor(Math.random() * positiveWords.length)]
+        tone = 'positive'
+      } else {
+        text = neutralWords[Math.floor(Math.random() * neutralWords.length)]
+        tone = 'dark'
+      }
+    } else if (limitedLevel < 44) {
+      if (Math.random() < 0.7) {
+        text = positiveWords[Math.floor(Math.random() * positiveWords.length)]
+        tone = 'positive'
+      } else {
+        text = neutralWords[Math.floor(Math.random() * neutralWords.length)]
+        tone = 'dark'
+      }
+    } else {
       text = positiveWords[Math.floor(Math.random() * positiveWords.length)]
       tone = 'positive'
     }
@@ -234,8 +265,94 @@ function App(): JSX.Element {
     })
   }
 
+  const handleTabPointerDown = (habitId: string, event: React.PointerEvent<HTMLButtonElement>): void => {
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return
+    }
+
+    event.preventDefault()
+    draggedHabitRef.current = habitId
+    dragTargetRef.current = null
+    didDragTabRef.current = false
+    setDraggedHabitId(habitId)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handleTabPointerMove = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    const sourceId = draggedHabitRef.current
+    if (!sourceId) {
+      return
+    }
+
+    const target = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+    const nextHabit = target?.closest('[data-habit-id]') as HTMLElement | null
+    const targetId = nextHabit?.dataset.habitId
+
+    if (targetId && targetId !== sourceId && targetId !== dragTargetRef.current) {
+      didDragTabRef.current = true
+      reorderHabits(sourceId, targetId)
+      dragTargetRef.current = targetId
+    }
+  }
+
+  const handleTabPointerUp = (): void => {
+    draggedHabitRef.current = null
+    dragTargetRef.current = null
+    setDraggedHabitId(null)
+  }
+
+  const resetDeleteConfirmation = (): void => {
+    setDeleteConfirming(false)
+  }
+
+  const handleDeleteHabit = (): void => {
+    if (habits.length <= 1) {
+      return
+    }
+
+    if (!deleteConfirming) {
+      setDeleteConfirming(true)
+      return
+    }
+
+    const currentIndex = habits.findIndex((habit) => habit.id === activeHabitId)
+    const remainingHabits = habits.filter((habit) => habit.id !== activeHabitId)
+    const nextActiveHabit = remainingHabits[Math.max(0, currentIndex - 1)] ?? remainingHabits[0]
+
+    setHabits(remainingHabits)
+    setActiveHabitId(nextActiveHabit.id)
+    setHabitStates((current) => {
+      const nextState = { ...current }
+      delete nextState[activeHabitId]
+      return nextState
+    })
+    setDeleteConfirming(false)
+    setDeleteConfirmed(true)
+    window.setTimeout(() => setDeleteConfirmed(false), 900)
+  }
+
+  const handleShareHabit = async (): Promise<void> => {
+    const habitName = activeHabit?.name?.trim() || 'this habit'
+    const slipCount = slipDates.filter((date) => date).length
+    const statusLine = panicLevel >= 40
+      ? `${habitName} is feeling strong — I’m on a good streak.`
+      : panicLevel >= 20
+        ? `${habitName} is shaky right now, but I’m still trying.`
+        : `${habitName} is rough right now and I need a reset.`
+
+    const shareText = `${habitName}: ${statusLine} Slip count in the last 7 days: ${slipCount}.`
+
+    try {
+      await navigator.clipboard.writeText(shareText)
+      setShareCopied(true)
+      window.setTimeout(() => setShareCopied(false), 1200)
+    } catch {
+      // ignore clipboard failures in unsupported browsers
+    }
+  }
+
   return (
-    <main className="app-shell" aria-label="Habit tracker">
+    <main className={`app-shell ${darkMode ? 'dark' : ''}`} aria-label="Habit tracker">
       <div className="emoji-overlay" aria-hidden="true">
         {bursts.map((burst) => (
           <span
@@ -264,25 +381,21 @@ function App(): JSX.Element {
             <button
               key={habit.id}
               type="button"
+              data-habit-id={habit.id}
               className={`tab-button ${habit.id === activeHabitId ? 'active' : ''} ${draggedHabitId === habit.id ? 'dragging' : ''}`}
-              draggable
-              onDragStart={(event) => {
-                setDraggedHabitId(habit.id)
-                event.dataTransfer.effectAllowed = 'move'
-                event.dataTransfer.setData('text/plain', habit.id)
+              onPointerDown={(event) => handleTabPointerDown(habit.id, event)}
+              onPointerMove={handleTabPointerMove}
+              onPointerUp={handleTabPointerUp}
+              onPointerCancel={handleTabPointerUp}
+              onLostPointerCapture={handleTabPointerUp}
+              onClick={() => {
+                if (didDragTabRef.current) {
+                  didDragTabRef.current = false
+                  return
+                }
+
+                setActiveHabitId(habit.id)
               }}
-              onDragOver={(event) => {
-                event.preventDefault()
-                event.dataTransfer.dropEffect = 'move'
-              }}
-              onDrop={(event) => {
-                event.preventDefault()
-                const sourceId = draggedHabitId ?? event.dataTransfer.getData('text/plain')
-                reorderHabits(sourceId, habit.id)
-                setDraggedHabitId(null)
-              }}
-              onDragEnd={() => setDraggedHabitId(null)}
-              onClick={() => setActiveHabitId(habit.id)}
             >
               {habit.name}
             </button>
@@ -294,7 +407,7 @@ function App(): JSX.Element {
             onClick={() => {
               const newHabit = {
                 id: `habit-${Date.now()}`,
-                name: `habit ${habits.length + 1}`,
+                name: '',
               }
               setHabits((current) => [...current, newHabit])
               setActiveHabitId(newHabit.id)
@@ -309,22 +422,61 @@ function App(): JSX.Element {
           >
             + add
           </button>
+
+          <button
+            type="button"
+            className="tab-button theme-toggle"
+            onClick={() => setDarkMode((current) => !current)}
+            aria-label="Toggle dark mode"
+            title="Toggle dark mode"
+          >
+            {darkMode ? '☀' : '☾'}
+          </button>
         </div>
 
-        <h1>
-          No{' '}
-          <input
-            className="habit-input"
-            aria-label="Habit field"
-            value={activeHabit?.name ?? ''}
-            onChange={(event) => {
-              const nextValue = event.target.value || 'habit'
-              setHabits((current) => current.map((habit) =>
-                habit.id === activeHabitId ? { ...habit, name: nextValue } : habit,
-              ))
-            }}
-          />
-        </h1>
+        <div className="habit-header">
+          <h1>
+            No{' '}
+            <input
+              className="habit-input"
+              aria-label="Habit field"
+              value={activeHabit?.name ?? ''}
+              onChange={(event) => {
+                const nextValue = event.target.value || 'habit'
+                setHabits((current) => current.map((habit) =>
+                  habit.id === activeHabitId ? { ...habit, name: nextValue } : habit,
+                ))
+              }}
+            />
+          </h1>
+
+          <div className="share-group">
+            <button
+              type="button"
+              className="share-button"
+              onClick={handleShareHabit}
+              aria-label="Copy habit status to clipboard"
+              title="Copy habit status"
+            >
+              ↗
+            </button>
+            {shareCopied && <span className="share-confirmation">copied to clipboard</span>}
+          </div>
+
+          <div className="delete-group">
+            <button
+              type="button"
+              className={`delete-habit-button ${deleteConfirming ? 'confirming' : ''}`}
+              onClick={handleDeleteHabit}
+              onBlur={resetDeleteConfirmation}
+              disabled={habits.length <= 1}
+              aria-label="Delete current habit"
+            >
+              {deleteConfirming ? <>🗑 sure?</> : '🗑'}
+            </button>
+            {deleteConfirmed && <span className="delete-confirmation">deleted</span>}
+          </div>
+        </div>
 
         <button type="button" className={`panic-button panic-${panicStage}`} onClick={triggerPanic}>
           Panic button
