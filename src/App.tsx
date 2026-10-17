@@ -144,8 +144,29 @@ function App(): JSX.Element {
   const dragTargetRef = useRef<string | null>(null)
   const didDragTabRef = useRef(false)
   const clickWindowRef = useRef<number[]>([])
-  const reminderHourSelectRef = useRef<HTMLSelectElement | null>(null)
+  const reminderHourSelectRef = useRef<HTMLDivElement | null>(null)
   const reminderHourOptions = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'))
+
+  useEffect(() => {
+    if (!reminderHourMenuOpen) {
+      return
+    }
+
+    const handlePointerDown = (event: MouseEvent): void => {
+      const target = event.target as Node | null
+      if (!target || !reminderHourSelectRef.current || reminderHourSelectRef.current.contains(target)) {
+        return
+      }
+
+      setReminderHourMenuOpen(false)
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+    }
+  }, [reminderHourMenuOpen])
 
   const recentDays = getLastSevenDays()
   const heatmapDays = getRecentHeatmapDays()
@@ -693,11 +714,15 @@ function App(): JSX.Element {
             aria-label={reminderEnabled ? 'Hide reminder time' : 'Show reminder time'}
             title={reminderEnabled ? 'Hide reminder time' : 'Show reminder time'}
           >
-            {reminderConfirming ? 'enable reminder' : reminderEnabled ? '🔔' : '🔕'}
+            {reminderConfirming ? 'track' : reminderEnabled ? '🔔' : '🔕'}
           </button>
 
           {reminderEnabled && (
-            <div className="reminder-hour-control" aria-label="Alarm time">
+            <div
+              className="reminder-hour-control"
+              aria-label="Alarm time"
+              ref={reminderHourSelectRef}
+            >
               <button
                 type="button"
                 className="reminder-hour-trigger"
