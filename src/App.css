@@ -558,6 +558,131 @@ h1 {
   font-size: 0.78rem;
 }
 
+.backup-toggle {
+  min-width: 32px;
+  padding: 7px 9px;
+  font-size: 0.85rem;
+}
+
+.backup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  background: rgba(15, 18, 22, 0.62);
+}
+
+.backup-dialog {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 480px);
+  max-height: min(90vh, 700px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 18px;
+  border: 1px solid #dedbd5;
+  border-radius: 10px;
+  background: #fff;
+  color: #242321;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.24);
+}
+
+.app-shell.dark .backup-dialog {
+  border-color: #354152;
+  background: #111827;
+  color: #edf2f7;
+}
+
+.backup-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.backup-heading h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.backup-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.backup-description,
+.backup-empty,
+.backup-error {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.backup-list {
+  display: grid;
+  gap: 8px;
+  max-height: 48vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backup-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #dedbd5;
+  padding-top: 8px;
+}
+
+.app-shell.dark .backup-item {
+  border-color: #354152;
+}
+
+.backup-details {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  font-size: 0.78rem;
+}
+
+.backup-details span {
+  font-size: 0.68rem;
+  opacity: 0.7;
+}
+
+.backup-restore {
+  flex: 0 0 auto;
+  border: 1px solid #c9c5be;
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: #f7f5f2;
+  color: inherit;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.app-shell.dark .backup-restore {
+  border-color: #475569;
+  background: #1b2430;
+}
+
+.backup-restored {
+  color: #167344;
+  font-size: 0.7rem;
+}
+
+.app-shell.dark .backup-restored {
+  color: #86efac;
+}
+
 .app-shell.dark .sync-message {
   color: #86efac;
 }
@@ -746,6 +871,16 @@ h1 {
   border-color: #31445d;
 }
 
+.week-day.tracked-clean {
+  background: #e8f3e9;
+  border-color: #8db99a;
+}
+
+.app-shell.dark .week-day.tracked-clean {
+  background: #173325;
+  border-color: #2f6d4a;
+}
+
 .app-shell.dark .week-day.slipped {
   background: #3d1015;
   border-color: #7a1d26;
@@ -815,6 +950,7 @@ h1 {
 }
 
 .heat-cell {
+  display: block;
   width: 100%;
   aspect-ratio: 1;
   border: 1px solid #e4e1db;
@@ -822,16 +958,35 @@ h1 {
   padding: 0;
   cursor: default;
   background: #ffffff;
-  pointer-events: none;
+  pointer-events: auto;
+}
+
+.heat-cell.habit-heat-cell {
+  cursor: help;
 }
 
 .heat-cell.clean {
   background: #f1efe9;
 }
 
+.heat-cell.clean.habit-heat-cell {
+  background: #e8f3e9;
+  border-color: #8db99a;
+}
+
 .heat-cell.slipped {
   background: #1d1d1b;
   border-color: #1d1d1b;
+}
+
+.app-shell.dark .heat-cell.clean.habit-heat-cell {
+  background: #173325;
+  border-color: #2f6d4a;
+}
+
+.app-shell.dark .heat-cell.habit-heat-cell.slipped {
+  background: #3d1015;
+  border-color: #7a1d26;
 }
 
 .heat-cell.mood-empty {

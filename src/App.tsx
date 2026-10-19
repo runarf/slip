@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import BackupDialog, { type DailyBackup } from './BackupDialog'
 import SyncDialog, { type SyncPayload } from './SyncDialog'
 import './App.css'
 
@@ -9,6 +10,9 @@ const THEME_KEY = 'habit-tracker-theme'
 const REMINDER_KEY = 'habit-tracker-reminder'
 const REMINDER_TIME_KEY = 'habit-tracker-reminder-time'
 const REMINDER_LAST_TRIGGER_KEY = 'habit-tracker-reminder-last-trigger'
+const BACKUPS_KEY = 'habit-tracker-daily-backups'
+const FIRST_USED_KEY = 'habit-tracker-first-used-date'
+const MAX_BACKUPS = 30
 
 interface HabitItem {
   id: string
@@ -18,6 +22,8 @@ interface HabitItem {
 interface HabitState {
   panicLevel: number
   slipDates: string[]
+  cleanDates?: string[]
+  trackedDates?: string[]
   moodValues?: Record<string, number>
 }
 
@@ -38,17 +44,48 @@ function getLastSevenDays(): Date[] {
   return days
 }
 
-function getRecentHeatmapDays(): Date[] {
-  const days: Date[] = []
-  const today = new Date()
+function getLocalDateKey(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
-  for (let i = 89; i >= 0; i -= 1) {
-    const date = new Date(today)
-    date.setDate(today.getDate() - i)
-    days.push(date)
+function getHabitHistoryDays(firstUsedDate: string): Date[] {
+  const firstDay = new Date(`${firstUsedDate}T12:00:00`)
+  if (Number.isNaN(firstDay.getTime())) return []
+
+  firstDay.setDate(firstDay.getDate() - 6)
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+  const days: Date[] = []
+
+  for (const date = firstDay; date <= today; date.setDate(date.getDate() + 1)) {
+    days.push(new Date(date))
   }
 
   return days
+}
+
+function loadBackups(): DailyBackup[] {
+  try {
+    const saved = localStorage.getItem(BACKUPS_KEY)
+    if (!saved) return []
+    const parsed: unknown = JSON.parse(saved)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((backup): backup is DailyBackup =>
+      !!backup
+      && typeof backup.id === 'string'
+      && typeof backup.date === 'string'
+      && typeof backup.createdAt === 'string'
+      && typeof backup.activeHabitId === 'string'
+      && Array.isArray(backup.habits)
+      && !!backup.habitStates
+      && typeof backup.habitStates === 'object',
+    ).slice(0, MAX_BACKUPS)
+  } catch {
+    return []
+  }
 }
 
 function App(): JSX.Element {
@@ -80,27 +117,38 @@ function App(): JSX.Element {
 
   const [habitStates, setHabitStates] = useState<Record<string, HabitState>>(() => {
     const saved = localStorage.getItem(SLIPS_KEY)
+    const initialSlipDates = getLastSevenDays().map((date) => getLocalDateKey(date))
     const fallbackState: HabitState = {
       panicLevel: 0,
-      slipDates: getLastSevenDays().map((date) => formatKey(date)),
+      slipDates: initialSlipDates,
+      cleanDates: [],
+      trackedDates: initialSlipDates,
       moodValues: {},
     }
 
     if (!saved) {
       return {
         'habit-1': fallbackState,
-        'habit-mood': { ...fallbackState },
+        'habit-mood': { panicLevel: 0, slipDates: [], cleanDates: [], trackedDates: [], moodValues: {} },
       }
     }
 
     try {
       const parsed = JSON.parse(saved) as Record<string, HabitState>
       if (parsed && parsed['habit-1']) {
+        const normalized = Object.fromEntries(Object.entries(parsed).map(([id, state]) => {
+          const cleanDates = state.cleanDates
+            ?? (state.trackedDates ?? []).filter((date) => !(state.slipDates ?? []).includes(date))
+          const trackedDates = [...new Set([...(state.trackedDates ?? []), ...(state.slipDates ?? []), ...cleanDates])]
+          return [id, { ...state, cleanDates, trackedDates }]
+        }))
         return {
-          ...parsed,
+          ...normalized,
           'habit-mood': {
             panicLevel: parsed['habit-mood']?.panicLevel ?? 0,
-            slipDates: parsed['habit-mood']?.slipDates ?? getLastSevenDays().map((date) => formatKey(date)),
+            slipDates: parsed['habit-mood']?.slipDates ?? [],
+            cleanDates: parsed['habit-mood']?.cleanDates ?? (parsed['habit-mood']?.trackedDates ?? []).filter((date) => !(parsed['habit-mood']?.slipDates ?? []).includes(date)),
+            trackedDates: [...new Set([...(parsed['habit-mood']?.trackedDates ?? []), ...(parsed['habit-mood']?.slipDates ?? []), ...(parsed['habit-mood']?.cleanDates ?? [])])],
             moodValues: parsed['habit-mood']?.moodValues ?? {},
           },
         }
@@ -111,9 +159,13 @@ function App(): JSX.Element {
 
     return {
       'habit-1': fallbackState,
-      'habit-mood': { ...fallbackState },
+      'habit-mood': { panicLevel: 0, slipDates: [], cleanDates: [], trackedDates: [], moodValues: {} },
     }
   })
+  const [backups, setBackups] = useState<DailyBackup[]>(loadBackups)
+  const [firstUsedDate, setFirstUsedDate] = useState(() =>
+    localStorage.getItem(FIRST_USED_KEY) ?? getLocalDateKey(new Date()),
+  )
 
   const [bursts, setBursts] = useState<Array<{ id: number; x: number; emoji: string }>>([])
   const [floatingText, setFloatingText] = useState<Array<{ id: number; x: number; text: string; tone: 'dark' | 'positive' }>>([])
@@ -170,11 +222,18 @@ function App(): JSX.Element {
   }, [reminderHourMenuOpen])
 
   const recentDays = getLastSevenDays()
-  const heatmapDays = getRecentHeatmapDays()
   const activeHabit = habits.find((habit) => habit.id === activeHabitId) ?? habits[0]
-  const activeState = habitStates[activeHabitId] ?? { panicLevel: 0, slipDates: getLastSevenDays().map((date) => formatKey(date)), moodValues: {} }
+  const activeState = habitStates[activeHabitId] ?? { panicLevel: 0, slipDates: [], cleanDates: [], moodValues: {} }
   const panicLevel = activeState.panicLevel
   const slipDates = activeState.slipDates
+  const cleanDates = activeState.cleanDates ?? (activeState.trackedDates ?? []).filter((date) => !slipDates.includes(date))
+  const trackedDates = activeState.trackedDates ?? [...slipDates, ...cleanDates]
+  const historyDays = getHabitHistoryDays(firstUsedDate)
+  const trackedHabitDays = historyDays
+    .map((date) => {
+      const dateKey = getLocalDateKey(date)
+      return { dateKey, date, tracked: trackedDates.includes(dateKey), slipped: !cleanDates.includes(dateKey) }
+    })
   const isMoodTab = activeHabitId === 'habit-mood'
   const moodOptions = [
     { value: 1, emoji: '😞', label: 'Awful' },
@@ -202,7 +261,8 @@ function App(): JSX.Element {
         ...current,
         'habit-mood': {
           panicLevel: 0,
-          slipDates: getLastSevenDays().map((date) => formatKey(date)),
+          slipDates: [],
+          cleanDates: [],
         },
       }
     })
@@ -215,6 +275,10 @@ function App(): JSX.Element {
   useEffect(() => {
     localStorage.setItem(HABIT_KEY, activeHabitId)
   }, [activeHabitId])
+
+  useEffect(() => {
+    localStorage.setItem(FIRST_USED_KEY, firstUsedDate)
+  }, [firstUsedDate])
 
   useEffect(() => {
     localStorage.setItem(THEME_KEY, darkMode ? 'dark' : 'light')
@@ -231,6 +295,53 @@ function App(): JSX.Element {
   useEffect(() => {
     localStorage.setItem(REMINDER_LAST_TRIGGER_KEY, lastReminderTrigger ?? '')
   }, [lastReminderTrigger])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(BACKUPS_KEY, JSON.stringify(backups))
+    } catch {
+      // Keep the current in-memory backups if browser storage is unavailable.
+    }
+  }, [backups])
+
+  useEffect(() => {
+    const createDailyBackup = (): void => {
+      if (!navigator.onLine) return
+
+      const date = getLocalDateKey(new Date())
+      if (backups.some((backup) => backup.date === date)) return
+
+      const backup: DailyBackup = {
+        id: `${date}-${Date.now()}`,
+        date,
+        createdAt: new Date().toISOString(),
+        activeHabitId,
+        firstUsedDate,
+        habits,
+        habitStates,
+      }
+
+      setBackups((current) => {
+        if (current.some((item) => item.date === date)) return current
+        return [backup, ...current].slice(0, MAX_BACKUPS)
+      })
+    }
+
+    const checkOnVisibility = (): void => {
+      if (document.visibilityState === 'visible') createDailyBackup()
+    }
+
+    createDailyBackup()
+    const intervalId = window.setInterval(createDailyBackup, 60_000)
+    window.addEventListener('online', createDailyBackup)
+    document.addEventListener('visibilitychange', checkOnVisibility)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('online', createDailyBackup)
+      document.removeEventListener('visibilitychange', checkOnVisibility)
+    }
+  }, [activeHabitId, backups, firstUsedDate, habitStates, habits])
 
   useEffect(() => {
     if (!reminderEnabled || !('Notification' in window)) {
@@ -294,26 +405,35 @@ function App(): JSX.Element {
     return () => window.clearTimeout(timeoutId)
   }, [activeHabitId, panicLevel])
 
-  const toggleSlip = (date: Date): void => {
+  const cycleDayStatus = (date: Date): void => {
     const key = formatKey(date)
 
     setHabitStates((current) => {
-      const existing = current[activeHabitId] ?? { panicLevel: 0, slipDates: [] }
-      const nextDates = existing.slipDates.includes(key)
-        ? existing.slipDates.filter((item) => item !== key)
-        : [...existing.slipDates, key]
+      const existing = current[activeHabitId] ?? { panicLevel: 0, slipDates: [], cleanDates: [] }
+      const currentClean = existing.cleanDates
+        ?? (existing.trackedDates ?? []).filter((item) => !existing.slipDates.includes(item))
+      const currentTracked = existing.trackedDates
+        ?? [...existing.slipDates, ...currentClean]
+      const nextClean = currentClean.includes(key)
+        ? currentClean.filter((item) => item !== key)
+        : [...currentClean, key]
 
       return {
         ...current,
         [activeHabitId]: {
           ...existing,
-          slipDates: nextDates,
+          trackedDates: [...new Set([...currentTracked, key])],
+          cleanDates: nextClean,
         },
       }
     })
   }
 
   const mergeSyncData = (incoming: SyncPayload): void => {
+    if (incoming.firstUsedDate && incoming.firstUsedDate < firstUsedDate) {
+      setFirstUsedDate(incoming.firstUsedDate)
+    }
+
     setHabits((current) => {
       const merged = new Map(current.map((habit) => [habit.id, habit]))
       incoming.habits.forEach((habit) => merged.set(habit.id, habit))
@@ -323,10 +443,19 @@ function App(): JSX.Element {
     setHabitStates((current) => {
       const merged = { ...current }
       Object.entries(incoming.habitStates).forEach(([id, remote]) => {
-        const local = merged[id] ?? { panicLevel: 0, slipDates: [], moodValues: {} }
+        const local = merged[id] ?? { panicLevel: 0, slipDates: [], cleanDates: [], moodValues: {} }
+        const localClean = local.cleanDates
+          ?? (local.trackedDates ?? []).filter((date) => !local.slipDates.includes(date))
+        const remoteClean = remote.cleanDates
+          ?? (remote.trackedDates ?? []).filter((date) => !remote.slipDates.includes(date))
+        const localTracked = local.trackedDates ?? [...local.slipDates, ...localClean]
+        const remoteTracked = remote.trackedDates ?? [...remote.slipDates, ...remoteClean]
+        const combinedSlips = [...new Set([...local.slipDates, ...remote.slipDates])].sort()
         merged[id] = {
           panicLevel: local.panicLevel,
-          slipDates: [...new Set([...local.slipDates, ...remote.slipDates])].sort(),
+          slipDates: combinedSlips,
+          cleanDates: [...new Set([...localClean, ...remoteClean])].sort(),
+          trackedDates: [...new Set([...localTracked, ...remoteTracked, ...combinedSlips])].sort(),
           moodValues: { ...(local.moodValues ?? {}), ...(remote.moodValues ?? {}) },
         }
       })
@@ -334,8 +463,22 @@ function App(): JSX.Element {
     })
   }
 
+  const restoreBackup = (backup: DailyBackup): void => {
+    setHabits(backup.habits)
+    setHabitStates(Object.fromEntries(Object.entries(backup.habitStates).map(([id, state]) => [id, {
+      ...state,
+      cleanDates: state.cleanDates ?? (state.trackedDates ?? []).filter((date) => !state.slipDates.includes(date)),
+      trackedDates: state.trackedDates ?? [
+        ...state.slipDates,
+        ...(state.cleanDates ?? (state.trackedDates ?? []).filter((date) => !state.slipDates.includes(date))),
+      ],
+    }])))
+    setActiveHabitId(backup.activeHabitId)
+    if (backup.firstUsedDate) setFirstUsedDate(backup.firstUsedDate)
+  }
+
   const isSlipDay = (date: Date): boolean => {
-    return slipDates.includes(formatKey(date))
+    return !cleanDates.includes(formatKey(date))
   }
 
   const setMoodValue = (moodValue: number): void => {
@@ -445,6 +588,10 @@ function App(): JSX.Element {
 
   const moodState = habitStates['habit-mood'] ?? { panicLevel: 0, slipDates: [], moodValues: {} }
   const todayMood = moodState.moodValues?.[formatKey(new Date())] ?? null
+  const moodHistoryDays = historyDays.map((date) => {
+    const dateKey = getLocalDateKey(date)
+    return { dateKey, date, value: moodState.moodValues?.[dateKey] ?? null }
+  })
 
   const reorderHabits = (sourceId: string, targetId: string): void => {
     if (sourceId === targetId) {
@@ -538,7 +685,7 @@ function App(): JSX.Element {
 
   const handleShareHabit = async (): Promise<void> => {
     const habitName = activeHabit?.name?.trim() || 'this habit'
-    const slipCount = slipDates.filter((date) => date).length
+    const slipCount = recentDays.filter((date) => !cleanDates.includes(formatKey(date))).length
     const statusLine = panicLevel >= 40
       ? `${habitName} is feeling strong — I’m on a good streak.`
       : panicLevel >= 20
@@ -718,7 +865,8 @@ function App(): JSX.Element {
                 ...current,
                 [newHabit.id]: {
                   panicLevel: 0,
-                  slipDates: getLastSevenDays().map((date) => formatKey(date)),
+                  slipDates: [],
+                  cleanDates: [],
                   moodValues: {},
                 },
               }))
@@ -738,7 +886,9 @@ function App(): JSX.Element {
             {reminderConfirming ? 'track' : reminderEnabled ? '🔔' : '🔕'}
           </button>
 
-          <SyncDialog habits={habits} habitStates={habitStates} onMerge={mergeSyncData} />
+          <BackupDialog backups={backups} onRestore={restoreBackup} />
+
+          <SyncDialog habits={habits} habitStates={habitStates} firstUsedDate={firstUsedDate} onMerge={mergeSyncData} />
 
           {reminderEnabled && (
             <div
@@ -797,19 +947,19 @@ function App(): JSX.Element {
 
             <div className="heatmap-wrap mood-heatmap" aria-label="Mood history heatmap">
               <div className="heatmap-labels">
-                <span>Past 90 days</span>
+                <span>First used {new Date(`${firstUsedDate}T12:00:00`).toLocaleDateString()}</span>
               </div>
               <div className="heatmap-grid">
-                {heatmapDays.map((date) => {
-                  const value = moodState.moodValues?.[formatKey(date)] ?? null
-                  const moodLabel = value ? moodOptions.find((option) => option.value === value)?.label : 'No mood'
-                  const title = `${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${value ? moodLabel : 'no mood'}`
+                {moodHistoryDays.map(({ dateKey, date, value }) => {
+                  const moodLabel = value ? moodOptions.find((option) => option.value === value)?.label : null
+                  const dateLabel = date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })
+                  const title = `${dateLabel} — ${moodLabel ?? 'no mood recorded'}`
 
                   return (
-                    <button
-                      key={formatKey(date)}
-                      type="button"
+                    <span
+                      key={dateKey}
                       className={`heat-cell ${value ? `mood-${value}` : 'mood-empty'}`}
+                      role="img"
                       aria-label={title}
                       title={title}
                     />
@@ -882,9 +1032,10 @@ function App(): JSX.Element {
                     <button
                       key={formatKey(date)}
                       type="button"
-                      className={`week-day ${slipped ? 'slipped' : ''}`}
-                      onClick={() => toggleSlip(date)}
-                      aria-label={`${dateLabel} ${slipped ? 'slipped' : 'no slip'}`}
+                      className={`week-day ${slipped ? 'slipped' : 'tracked-clean'}`}
+                      onClick={() => cycleDayStatus(date)}
+                      aria-label={`${dateLabel} ${slipped ? 'slipped, click to mark clean' : 'clean, click to mark slipped'}`}
+                      title={`${dateLabel}: ${slipped ? 'slipped · click to mark clean' : 'clean · click to mark slipped'}`}
                     >
                       <span className="day-name">{date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
                       <span className="day-number">{date.getDate()}</span>
@@ -897,19 +1048,19 @@ function App(): JSX.Element {
 
             <div className="heatmap-wrap" aria-label="Recent activity heatmap">
               <div className="heatmap-labels">
-                <span>Past 90 days</span>
+                <span>First used {new Date(`${firstUsedDate}T12:00:00`).toLocaleDateString()}</span>
               </div>
               <div className="heatmap-grid">
-                {heatmapDays.map((date) => {
-                  const slipped = isSlipDay(date)
-                  const hoverText = `${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${slipped ? 'slipped' : 'clean'}`
+                {trackedHabitDays.map(({ dateKey, date, tracked, slipped }) => {
+                  const status = tracked ? (slipped ? 'slipped' : 'clean') : 'empty'
+                  const label = tracked ? (slipped ? 'slipped' : 'clean') : 'not tracked'
+                  const hoverText = `${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${label}`
 
                   return (
-                    <button
-                      key={formatKey(date)}
-                      type="button"
-                      className={`heat-cell ${slipped ? 'slipped' : 'clean'}`}
-                      onClick={() => toggleSlip(date)}
+                    <span
+                      key={dateKey}
+                      className={`heat-cell habit-heat-cell ${status === 'empty' ? 'mood-empty' : status}`}
+                      role="img"
                       aria-label={hoverText}
                       title={hoverText}
                     />
