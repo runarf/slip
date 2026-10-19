@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import SyncDialog, { type SyncPayload } from './SyncDialog'
 import './App.css'
 
 const HABIT_KEY = 'habit-tracker-habit'
@@ -182,7 +183,6 @@ function App(): JSX.Element {
     { value: 4, emoji: '😊', label: 'Good' },
     { value: 5, emoji: '😄', label: 'Great' },
   ]
-
   useEffect(() => {
     setHabits((current) => {
       const hasMoodTab = current.some((habit) => habit.id === 'habit-mood')
@@ -310,6 +310,27 @@ function App(): JSX.Element {
           slipDates: nextDates,
         },
       }
+    })
+  }
+
+  const mergeSyncData = (incoming: SyncPayload): void => {
+    setHabits((current) => {
+      const merged = new Map(current.map((habit) => [habit.id, habit]))
+      incoming.habits.forEach((habit) => merged.set(habit.id, habit))
+      return [...merged.values()]
+    })
+
+    setHabitStates((current) => {
+      const merged = { ...current }
+      Object.entries(incoming.habitStates).forEach(([id, remote]) => {
+        const local = merged[id] ?? { panicLevel: 0, slipDates: [], moodValues: {} }
+        merged[id] = {
+          panicLevel: local.panicLevel,
+          slipDates: [...new Set([...local.slipDates, ...remote.slipDates])].sort(),
+          moodValues: { ...(local.moodValues ?? {}), ...(remote.moodValues ?? {}) },
+        }
+      })
+      return merged
     })
   }
 
@@ -716,6 +737,8 @@ function App(): JSX.Element {
           >
             {reminderConfirming ? 'track' : reminderEnabled ? '🔔' : '🔕'}
           </button>
+
+          <SyncDialog habits={habits} habitStates={habitStates} onMerge={mergeSyncData} />
 
           {reminderEnabled && (
             <div
