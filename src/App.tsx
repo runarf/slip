@@ -55,7 +55,6 @@ function getHabitHistoryDays(firstUsedDate: string): Date[] {
   const firstDay = new Date(`${firstUsedDate}T12:00:00`)
   if (Number.isNaN(firstDay.getTime())) return []
 
-  firstDay.setDate(firstDay.getDate() - 6)
   const today = new Date()
   today.setHours(12, 0, 0, 0)
   const days: Date[] = []
@@ -140,7 +139,16 @@ function App(): JSX.Element {
           const cleanDates = state.cleanDates
             ?? (state.trackedDates ?? []).filter((date) => !(state.slipDates ?? []).includes(date))
           const trackedDates = [...new Set([...(state.trackedDates ?? []), ...(state.slipDates ?? []), ...cleanDates])]
-          return [id, { ...state, cleanDates, trackedDates }]
+          const shouldSeedHistory = id !== 'habit-mood'
+            && trackedDates.length === 0
+            && (state.slipDates ?? []).length === 0
+            && cleanDates.length === 0
+          return [id, {
+            ...state,
+            slipDates: shouldSeedHistory ? initialSlipDates : state.slipDates ?? [],
+            cleanDates,
+            trackedDates: shouldSeedHistory ? initialSlipDates : trackedDates,
+          }]
         }))
         return {
           ...normalized,
@@ -163,9 +171,13 @@ function App(): JSX.Element {
     }
   })
   const [backups, setBackups] = useState<DailyBackup[]>(loadBackups)
-  const [firstUsedDate, setFirstUsedDate] = useState(() =>
-    localStorage.getItem(FIRST_USED_KEY) ?? getLocalDateKey(new Date()),
-  )
+  const [firstUsedDate, setFirstUsedDate] = useState(() => {
+    const firstTrackingDate = getLocalDateKey(getLastSevenDays()[0])
+    const savedFirstUsedDate = localStorage.getItem(FIRST_USED_KEY)
+    return savedFirstUsedDate && savedFirstUsedDate < firstTrackingDate
+      ? savedFirstUsedDate
+      : firstTrackingDate
+  })
 
   const [bursts, setBursts] = useState<Array<{ id: number; x: number; emoji: string }>>([])
   const [floatingText, setFloatingText] = useState<Array<{ id: number; x: number; text: string; tone: 'dark' | 'positive' }>>([])
@@ -859,14 +871,16 @@ function App(): JSX.Element {
                 id: `habit-${Date.now()}`,
                 name: '',
               }
+              const initialSlipDates = recentDays.map((date) => getLocalDateKey(date))
               setHabits((current) => [...current, newHabit])
               setActiveHabitId(newHabit.id)
               setHabitStates((current) => ({
                 ...current,
                 [newHabit.id]: {
                   panicLevel: 0,
-                  slipDates: [],
+                  slipDates: initialSlipDates,
                   cleanDates: [],
+                  trackedDates: initialSlipDates,
                   moodValues: {},
                 },
               }))
