@@ -27,8 +27,13 @@ interface HabitState {
   moodValues?: Record<string, number>
 }
 
+interface HeatmapTooltip {
+  type: 'mood' | 'habit'
+  dateKey: string
+}
+
 function formatKey(date: Date): string {
-  return date.toISOString().slice(0, 10)
+  return getLocalDateKey(date)
 }
 
 function getLastSevenDays(): Date[] {
@@ -185,6 +190,7 @@ function App(): JSX.Element {
   const [shareCopied, setShareCopied] = useState(false)
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteConfirmed, setDeleteConfirmed] = useState(false)
+  const [activeHeatmapTooltip, setActiveHeatmapTooltip] = useState<HeatmapTooltip | null>(null)
   const [reminderConfirming, setReminderConfirming] = useState(false)
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem(THEME_KEY)
@@ -244,7 +250,8 @@ function App(): JSX.Element {
   const trackedHabitDays = historyDays
     .map((date) => {
       const dateKey = getLocalDateKey(date)
-      return { dateKey, date, tracked: trackedDates.includes(dateKey), slipped: !cleanDates.includes(dateKey) }
+      const tracked = trackedDates.includes(dateKey)
+      return { dateKey, date, tracked, slipped: tracked && !cleanDates.includes(dateKey) }
     })
   const isMoodTab = activeHabitId === 'habit-mood'
   const moodOptions = [
@@ -489,8 +496,10 @@ function App(): JSX.Element {
     if (backup.firstUsedDate) setFirstUsedDate(backup.firstUsedDate)
   }
 
-  const isSlipDay = (date: Date): boolean => {
-    return !cleanDates.includes(formatKey(date))
+  const getDayStatus = (date: Date): 'not-tracked' | 'slipped' | 'clean' => {
+    const key = formatKey(date)
+    if (!trackedDates.includes(key)) return 'not-tracked'
+    return cleanDates.includes(key) ? 'clean' : 'slipped'
   }
 
   const setMoodValue = (moodValue: number): void => {
@@ -604,6 +613,23 @@ function App(): JSX.Element {
     const dateKey = getLocalDateKey(date)
     return { dateKey, date, value: moodState.moodValues?.[dateKey] ?? null }
   })
+  const selectedMoodDay = activeHeatmapTooltip?.type === 'mood'
+    ? moodHistoryDays.find(({ dateKey }) => dateKey === activeHeatmapTooltip.dateKey)
+    : undefined
+  const selectedHabitDay = activeHeatmapTooltip?.type === 'habit'
+    ? trackedHabitDays.find(({ dateKey }) => dateKey === activeHeatmapTooltip.dateKey)
+    : undefined
+  const activeHeatmapTooltipText = selectedMoodDay
+    ? `${selectedMoodDay.date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${moodOptions.find((option) => option.value === selectedMoodDay.value)?.label ?? 'no mood recorded'}`
+    : selectedHabitDay
+      ? `${selectedHabitDay.date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${selectedHabitDay.tracked ? (selectedHabitDay.slipped ? 'slipped' : 'clean') : 'not tracked'}`
+      : null
+
+  const toggleHeatmapTooltip = (type: HeatmapTooltip['type'], dateKey: string): void => {
+    setActiveHeatmapTooltip((current) =>
+      current?.type === type && current.dateKey === dateKey ? null : { type, dateKey },
+    )
+  }
 
   const reorderHabits = (sourceId: string, targetId: string): void => {
     if (sourceId === targetId) {
@@ -968,18 +994,25 @@ function App(): JSX.Element {
                   const moodLabel = value ? moodOptions.find((option) => option.value === value)?.label : null
                   const dateLabel = date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })
                   const title = `${dateLabel} — ${moodLabel ?? 'no mood recorded'}`
+                  const isTooltipActive = activeHeatmapTooltip?.type === 'mood'
+                    && activeHeatmapTooltip.dateKey === dateKey
 
                   return (
-                    <span
+                    <button
                       key={dateKey}
+                      type="button"
                       className={`heat-cell ${value ? `mood-${value}` : 'mood-empty'}`}
-                      role="img"
                       aria-label={title}
+                      aria-expanded={isTooltipActive}
                       title={title}
+                      onClick={() => toggleHeatmapTooltip('mood', dateKey)}
                     />
                   )
                 })}
               </div>
+              {activeHeatmapTooltip?.type === 'mood' && activeHeatmapTooltipText && (
+                <div className="heatmap-tooltip" role="status">{activeHeatmapTooltipText}</div>
+              )}
             </div>
           </div>
         ) : (
@@ -1035,7 +1068,7 @@ function App(): JSX.Element {
             <div className="week-view" aria-label="Last 7 days calendar">
               <div className="week-grid">
                 {recentDays.map((date) => {
-                  const slipped = isSlipDay(date)
+                  const status = getDayStatus(date)
                   const dateLabel = date.toLocaleDateString(undefined, {
                     weekday: 'short',
                     month: 'short',
@@ -1046,14 +1079,14 @@ function App(): JSX.Element {
                     <button
                       key={formatKey(date)}
                       type="button"
-                      className={`week-day ${slipped ? 'slipped' : 'tracked-clean'}`}
+                      className={`week-day ${status === 'slipped' ? 'slipped' : status === 'clean' ? 'tracked-clean' : 'not-tracked'}`}
                       onClick={() => cycleDayStatus(date)}
-                      aria-label={`${dateLabel} ${slipped ? 'slipped, click to mark clean' : 'clean, click to mark slipped'}`}
-                      title={`${dateLabel}: ${slipped ? 'slipped · click to mark clean' : 'clean · click to mark slipped'}`}
+                      aria-label={`${dateLabel} ${status === 'not-tracked' ? 'not tracked, click to mark clean' : status === 'slipped' ? 'slipped, click to mark clean' : 'clean, click to mark slipped'}`}
+                      title={`${dateLabel}: ${status === 'not-tracked' ? 'not tracked · click to mark clean' : status === 'slipped' ? 'slipped · click to mark clean' : 'clean · click to mark slipped'}`}
                     >
                       <span className="day-name">{date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
                       <span className="day-number">{date.getDate()}</span>
-                      <span className="day-status">{slipped ? 'slipped' : 'clean'}</span>
+                      <span className="day-status">{status === 'not-tracked' ? 'not tracked' : status}</span>
                     </button>
                   )
                 })}
@@ -1069,18 +1102,25 @@ function App(): JSX.Element {
                   const status = tracked ? (slipped ? 'slipped' : 'clean') : 'empty'
                   const label = tracked ? (slipped ? 'slipped' : 'clean') : 'not tracked'
                   const hoverText = `${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${label}`
+                  const isTooltipActive = activeHeatmapTooltip?.type === 'habit'
+                    && activeHeatmapTooltip.dateKey === dateKey
 
                   return (
-                    <span
+                    <button
                       key={dateKey}
+                      type="button"
                       className={`heat-cell habit-heat-cell ${status === 'empty' ? 'mood-empty' : status}`}
-                      role="img"
                       aria-label={hoverText}
+                      aria-expanded={isTooltipActive}
                       title={hoverText}
+                      onClick={() => toggleHeatmapTooltip('habit', dateKey)}
                     />
                   )
                 })}
               </div>
+              {activeHeatmapTooltip?.type === 'habit' && activeHeatmapTooltipText && (
+                <div className="heatmap-tooltip" role="status">{activeHeatmapTooltipText}</div>
+              )}
             </div>
           </>
         )}
