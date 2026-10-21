@@ -742,6 +742,14 @@ h1 {
   text-transform: lowercase;
 }
 
+.share-confirmation.error {
+  color: #b91c1c;
+}
+
+.app-shell.dark .share-confirmation.error {
+  color: #fca5a5;
+}
+
 .delete-confirmation {
   font-size: 0.56rem;
   font-weight: 700;

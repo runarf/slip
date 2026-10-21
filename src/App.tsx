@@ -187,7 +187,7 @@ function App(): JSX.Element {
   const [bursts, setBursts] = useState<Array<{ id: number; x: number; emoji: string }>>([])
   const [floatingText, setFloatingText] = useState<Array<{ id: number; x: number; text: string; tone: 'dark' | 'positive' }>>([])
   const [draggedHabitId, setDraggedHabitId] = useState<string | null>(null)
-  const [shareCopied, setShareCopied] = useState(false)
+  const [shareMessage, setShareMessage] = useState('')
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteConfirmed, setDeleteConfirmed] = useState(false)
   const [activeHeatmapTooltip, setActiveHeatmapTooltip] = useState<HeatmapTooltip | null>(null)
@@ -723,40 +723,36 @@ function App(): JSX.Element {
 
   const handleShareHabit = async (): Promise<void> => {
     const habitName = activeHabit?.name?.trim() || 'this habit'
-    const slipCount = recentDays.filter((date) => !cleanDates.includes(formatKey(date))).length
-    const statusLine = panicLevel >= 40
-      ? `${habitName} is feeling strong — I’m on a good streak.`
-      : panicLevel >= 20
-        ? `${habitName} is shaky right now, but I’m still trying.`
-        : `${habitName} is rough right now and I need a reset.`
-
-    const shareText = `${habitName}: ${statusLine} Slip count in the last 7 days: ${slipCount}.`
-    const userAgent = navigator.userAgent || ''
-    const isDesktopWindows = /Windows/i.test(userAgent) && !/Mobile|Android|iPhone|iPad/i.test(userAgent)
+    const trackedRecentDays = recentDays.filter((date) => trackedDates.includes(formatKey(date)))
+    const cleanCount = trackedRecentDays.filter((date) => cleanDates.includes(formatKey(date))).length
+    const slippedCount = trackedRecentDays.length - cleanCount
+    const dateSummary = trackedRecentDays.length
+      ? `Last 7 days: ${trackedRecentDays.length} tracked, ${cleanCount} clean, ${slippedCount} slipped.`
+      : 'No check-ins in the last 7 days.'
+    const url = window.location.href
+    const shareText = `${habitName} check-in\n${dateSummary}\nTrack with me: ${url}`
+    const shareData = {
+      title: `${habitName} check-in`,
+      text: dateSummary,
+      url,
+    }
 
     try {
-      if (navigator.share && !isDesktopWindows) {
-        await navigator.share({
-          title: 'Slip tracker',
-          text: shareText,
-        })
-      } else if (navigator.clipboard) {
+      if (navigator.share) {
+        await navigator.share(shareData)
+        setShareMessage('shared')
+      } else if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(shareText)
+        setShareMessage('copied')
+      } else {
+        setShareMessage('sharing unavailable')
       }
-
-      setShareCopied(true)
-      window.setTimeout(() => setShareCopied(false), 1200)
-    } catch {
-      try {
-        if (navigator.clipboard) {
-          await navigator.clipboard.writeText(shareText)
-          setShareCopied(true)
-          window.setTimeout(() => setShareCopied(false), 1200)
-        }
-      } catch {
-        // ignore clipboard failures in unsupported browsers
-      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setShareMessage('could not share')
     }
+
+    window.setTimeout(() => setShareMessage(''), 2500)
   }
 
   const handleReminderToggle = async (): Promise<void> => {
@@ -1037,13 +1033,17 @@ function App(): JSX.Element {
                 <button
                   type="button"
                   className="share-button"
-                  onClick={handleShareHabit}
-                  aria-label="Copy habit status to clipboard"
-                  title="Copy habit status"
+                  onClick={() => void handleShareHabit()}
+                  aria-label="Share habit progress"
+                  title="Share habit progress"
                 >
                   ↗
                 </button>
-                {shareCopied && <span className="share-confirmation">copied to clipboard</span>}
+                {shareMessage && (
+                  <span className={`share-confirmation ${shareMessage === 'could not share' ? 'error' : ''}`} role="status">
+                    {shareMessage}
+                  </span>
+                )}
               </div>
 
               <div className="delete-group">
