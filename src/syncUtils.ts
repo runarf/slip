@@ -32,10 +32,13 @@ export function isDefaultSeedData(
   habits: HabitItem[],
   habitStates: Record<string, HabitState>
 ): boolean {
-  if (habits.length !== 2) return false
+  if (habits.length < 1 || habits.length > 2) return false
   const habit1 = habits.find((h) => h.id === 'habit-1')
   const habitMood = habits.find((h) => h.id === 'habit-mood')
-  if (!habit1 || !habitMood || habit1.name !== 'news' || habitMood.name !== 'mood') {
+  if (!habit1 || habit1.name !== 'news') {
+    return false
+  }
+  if ((habits.length === 2 && !habitMood) || (habitMood && habitMood.name !== 'mood')) {
     return false
   }
 
@@ -66,28 +69,11 @@ export function createLocalSafetySnapshot(snapshot: Omit<AppSnapshot, 'savedAt'>
 }
 
 /**
- * Merges two lists of habits by unique ID.
- */
-export function mergeHabitLists(local: HabitItem[], remote: HabitItem[]): HabitItem[] {
-  const map = new Map<string, HabitItem>()
-  local.forEach((h) => map.set(h.id, h))
-  remote.forEach((h) => {
-    const existing = map.get(h.id)
-    if (existing) {
-      map.set(h.id, { id: h.id, name: h.name || existing.name })
-    } else {
-      map.set(h.id, h)
-    }
-  })
-  return Array.from(map.values())
-}
-
-/**
  * Merges habit states: combines slip dates, clean dates, tracked dates, and mood values.
  */
 export function mergeHabitStates(
   local: Record<string, HabitState>,
-  remote: Record<string, HabitState>
+  remote: Record<string, Partial<HabitState> & Pick<HabitState, 'slipDates'>>
 ): Record<string, HabitState> {
   const merged: Record<string, HabitState> = { ...local }
 
@@ -125,6 +111,85 @@ export function mergeHabitStates(
   })
 
   return merged
+}
+
+/**
+ * Merges all habits with the same non-empty, case-insensitive name and combines their states.
+ */
+export function mergeHabitData(
+  localHabits: HabitItem[],
+  localStates: Record<string, HabitState>,
+  remoteHabits: HabitItem[],
+  remoteStates: Record<string, Partial<HabitState> & Pick<HabitState, 'slipDates'>>
+): { habits: HabitItem[]; habitStates: Record<string, HabitState> } {
+  const parents = new Map<string, string>()
+  const find = (id: string): string => {
+    const parent = parents.get(id)
+    if (!parent) {
+      parents.set(id, id)
+      return id
+    }
+    if (parent === id) return id
+    const root = find(parent)
+    parents.set(id, root)
+    return root
+  }
+  const union = (left: string, right: string): void => {
+    const leftRoot = find(left)
+    const rightRoot = find(right)
+    if (leftRoot !== rightRoot) parents.set(rightRoot, leftRoot)
+  }
+
+  const habitLists = [localHabits, remoteHabits].map((habits) =>
+    habits.filter((habit) => habit.id !== 'habit-mood'),
+  )
+  const allHabits = habitLists.flat()
+  const firstIdByName = new Map<string, string>()
+  allHabits.forEach((habit) => {
+    find(habit.id)
+    const name = habit.name.trim().toLowerCase()
+    if (!name) return
+    const firstId = firstIdByName.get(name)
+    if (firstId) {
+      union(firstId, habit.id)
+    } else {
+      firstIdByName.set(name, habit.id)
+    }
+  })
+
+  const canonicalIdByRoot = new Map<string, string>()
+  habitLists.forEach((list) => {
+    list.forEach((habit) => {
+      const root = find(habit.id)
+      if (!canonicalIdByRoot.has(root)) canonicalIdByRoot.set(root, habit.id)
+    })
+  })
+
+  const mergedHabits = new Map<string, HabitItem>()
+  localHabits.forEach((habit) => {
+    const id = canonicalIdByRoot.get(find(habit.id)) ?? habit.id
+    if (!mergedHabits.has(id)) mergedHabits.set(id, { ...habit, id })
+  })
+  remoteHabits.forEach((habit) => {
+    const id = canonicalIdByRoot.get(find(habit.id)) ?? habit.id
+    const existing = mergedHabits.get(id)
+    if (existing) {
+      if (habit.id === id && habit.name) mergedHabits.set(id, { ...existing, name: habit.name })
+    } else {
+      mergedHabits.set(id, { ...habit, id })
+    }
+  })
+
+  let habitStates: Record<string, HabitState> = {}
+  const stateLists = [localStates, remoteStates]
+  stateLists.forEach((states) => {
+    Object.entries(states).forEach(([sourceId, state]) => {
+      const id = canonicalIdByRoot.get(find(sourceId)) ?? sourceId
+      habitStates = mergeHabitStates(habitStates, { [id]: state })
+    })
+  })
+
+  return { habits: Array.from(mergedHabits.values()), habitStates }
 }
 
 /**

@@ -9,8 +9,6 @@ interface AuthDialogProps {
   user: User | null
   syncStatus: 'idle' | 'syncing' | 'synced' | 'error' | 'offline'
   lastSyncTime: Date | null
-  onSyncToCloud: () => Promise<void>
-  onRestoreFromCloud: () => Promise<void>
 }
 
 function getReadableErrorMessage(err: unknown): string {
@@ -39,8 +37,6 @@ export default function AuthDialog({
   user,
   syncStatus,
   lastSyncTime,
-  onSyncToCloud,
-  onRestoreFromCloud,
 }: AuthDialogProps): JSX.Element {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -152,7 +148,13 @@ export default function AuthDialog({
                       <span className="auth-hint">{user.email}</span>
                     )}
                     <p className="auth-user-sync-status">
-                      {syncStatus === 'syncing' ? 'Syncing...' : 'All changes saved to cloud'}
+                      {syncStatus === 'syncing'
+                        ? 'Syncing changes automatically...'
+                        : syncStatus === 'error'
+                          ? 'Cloud sync failed. Check your connection and try again.'
+                          : syncStatus === 'offline'
+                            ? 'Offline. Changes will sync when you reconnect.'
+                            : 'Changes sync automatically across your devices.'}
                       {lastSyncTime && (
                         <span className="auth-last-sync">
                           {' '}• {lastSyncTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
@@ -163,22 +165,9 @@ export default function AuthDialog({
                 </div>
 
                 <div className="auth-actions-group">
-                  <button
-                    type="button"
-                    className="tab-button auth-action-btn"
-                    onClick={onSyncToCloud}
-                    disabled={loading || syncStatus === 'syncing'}
-                  >
-                    ☁️ Upload Local Data to Cloud
-                  </button>
-                  <button
-                    type="button"
-                    className="tab-button auth-action-btn"
-                    onClick={onRestoreFromCloud}
-                    disabled={loading || syncStatus === 'syncing'}
-                  >
-                    ⬇️ Download / Merge from Cloud
-                  </button>
+                  <p className="auth-desc">
+                    Your data syncs automatically across devices whenever you make a change.
+                  </p>
                 </div>
 
                 <div className="auth-footer-actions">

@@ -5,14 +5,15 @@ import AuthDialog from './AuthDialog'
 import {
   isDefaultSeedData,
   createLocalSafetySnapshot,
-  mergeHabitLists,
-  mergeHabitStates,
+  mergeHabitData,
   mergeDailyBackups,
 } from './syncUtils'
 import {
   subscribeToAuth,
   saveUserDataToCloud,
   getUserDataFromCloud,
+  subscribeToCloudUserData,
+  type CloudDataPayload,
 } from './firebase'
 import type { User } from 'firebase/auth'
 import './App.css'
@@ -111,7 +112,7 @@ function App(): JSX.Element {
     const saved = localStorage.getItem(HABITS_KEY)
 
     if (saved) {
-      const parsed = JSON.parse(saved) as HabitItem[]
+      const parsed = (JSON.parse(saved) as HabitItem[]).filter((habit) => habit.id !== 'habit-mood')
       if (parsed.length > 0) {
         return parsed
       }
@@ -119,14 +120,13 @@ function App(): JSX.Element {
 
     return [
       { id: 'habit-1', name: 'news' },
-      { id: 'habit-mood', name: 'mood' },
     ]
   })
 
   const [activeHabitId, setActiveHabitId] = useState<string>(() => {
     const saved = localStorage.getItem(HABIT_KEY)
 
-    if (saved) {
+    if (saved && saved !== 'habit-mood') {
       return saved
     }
 
@@ -271,7 +271,6 @@ function App(): JSX.Element {
       const tracked = trackedDates.includes(dateKey)
       return { dateKey, date, tracked, slipped: tracked && !cleanDates.includes(dateKey) }
     })
-  const isMoodTab = activeHabitId === 'habit-mood'
   const moodOptions = [
     { value: 1, emoji: '😞', label: 'Awful' },
     { value: 2, emoji: '😕', label: 'Low' },
@@ -279,32 +278,6 @@ function App(): JSX.Element {
     { value: 4, emoji: '😊', label: 'Good' },
     { value: 5, emoji: '😄', label: 'Great' },
   ]
-  useEffect(() => {
-    setHabits((current) => {
-      const hasMoodTab = current.some((habit) => habit.id === 'habit-mood')
-      if (hasMoodTab) {
-        return current
-      }
-
-      return [...current, { id: 'habit-mood', name: 'mood' }]
-    })
-
-    setHabitStates((current) => {
-      if (current['habit-mood']) {
-        return current
-      }
-
-      return {
-        ...current,
-        'habit-mood': {
-          panicLevel: 0,
-          slipDates: [],
-          cleanDates: [],
-        },
-      }
-    })
-  }, [])
-
   useEffect(() => {
     localStorage.setItem(HABITS_KEY, JSON.stringify(habits))
   }, [habits])
@@ -471,37 +444,14 @@ function App(): JSX.Element {
       setFirstUsedDate(incoming.firstUsedDate)
     }
 
-    setHabits((current) => {
-      const merged = new Map(current.map((habit) => [habit.id, habit]))
-      incoming.habits.forEach((habit) => merged.set(habit.id, habit))
-      return [...merged.values()]
-    })
-
-    setHabitStates((current) => {
-      const merged = { ...current }
-      Object.entries(incoming.habitStates).forEach(([id, remote]) => {
-        const local = merged[id] ?? { panicLevel: 0, slipDates: [], cleanDates: [], moodValues: {} }
-        const localClean = local.cleanDates
-          ?? (local.trackedDates ?? []).filter((date) => !local.slipDates.includes(date))
-        const remoteClean = remote.cleanDates
-          ?? (remote.trackedDates ?? []).filter((date) => !remote.slipDates.includes(date))
-        const localTracked = local.trackedDates ?? [...local.slipDates, ...localClean]
-        const remoteTracked = remote.trackedDates ?? [...remote.slipDates, ...remoteClean]
-        const combinedSlips = [...new Set([...local.slipDates, ...remote.slipDates])].sort()
-        merged[id] = {
-          panicLevel: local.panicLevel,
-          slipDates: combinedSlips,
-          cleanDates: [...new Set([...localClean, ...remoteClean])].sort(),
-          trackedDates: [...new Set([...localTracked, ...remoteTracked, ...combinedSlips])].sort(),
-          moodValues: { ...(local.moodValues ?? {}), ...(remote.moodValues ?? {}) },
-        }
-      })
-      return merged
-    })
+    const merged = mergeHabitData(habits, habitStates, incoming.habits, incoming.habitStates)
+    setHabits(merged.habits)
+    setHabitStates(merged.habitStates)
   }
 
   const restoreBackup = (backup: DailyBackup): void => {
-    setHabits(backup.habits)
+    const restoredHabits = backup.habits.filter((habit) => habit.id !== 'habit-mood')
+    setHabits(restoredHabits)
     setHabitStates(Object.fromEntries(Object.entries(backup.habitStates).map(([id, state]) => [id, {
       ...state,
       cleanDates: state.cleanDates ?? (state.trackedDates ?? []).filter((date) => !state.slipDates.includes(date)),
@@ -510,106 +460,71 @@ function App(): JSX.Element {
         ...(state.cleanDates ?? (state.trackedDates ?? []).filter((date) => !state.slipDates.includes(date))),
       ],
     }])))
-    setActiveHabitId(backup.activeHabitId)
+    setActiveHabitId(backup.activeHabitId === 'habit-mood'
+      ? restoredHabits[0]?.id ?? 'habit-1'
+      : backup.activeHabitId)
     if (backup.firstUsedDate) setFirstUsedDate(backup.firstUsedDate)
   }
 
   const cloudDataReadyRef = useRef(false)
-
-  const syncToCloud = async (): Promise<void> => {
-    if (!currentUser) return
-    setSyncStatus('syncing')
-    try {
-      await saveUserDataToCloud(currentUser.uid, {
-        habits,
-        habitStates,
-        firstUsedDate,
-        activeHabitId,
-        backups,
-      })
-      setSyncStatus('synced')
-      setLastSyncTime(new Date())
-    } catch (err) {
-      console.error('Failed to sync to cloud:', err)
-      setSyncStatus('error')
-    }
-  }
-
-  const restoreFromCloud = async (): Promise<void> => {
-    if (!currentUser) return
-    setSyncStatus('syncing')
-    try {
-      const cloudData = await getUserDataFromCloud(currentUser.uid)
-      if (!cloudData) {
-        await syncToCloud()
-        return
-      }
-
-      // Safety net: preserve pre-restore local data
-      createLocalSafetySnapshot({
-        habits,
-        habitStates,
-        firstUsedDate,
-        activeHabitId,
-        backups,
-      })
-
-      const remoteHabits = (cloudData.habits as HabitItem[]) ?? []
-      const remoteHabitStates = (cloudData.habitStates as Record<string, HabitState>) ?? {}
-      const remoteBackups = (cloudData.backups as DailyBackup[]) ?? []
-      const remoteFirstUsed = cloudData.firstUsedDate
-
-      if (isDefaultSeedData(habits, habitStates) && remoteHabits.length > 0) {
-        setHabits(remoteHabits)
-        setHabitStates(remoteHabitStates)
-        if (remoteFirstUsed) setFirstUsedDate(remoteFirstUsed)
-        if (cloudData.activeHabitId && remoteHabits.some((h) => h.id === cloudData.activeHabitId)) {
-          setActiveHabitId(cloudData.activeHabitId)
-        } else if (remoteHabits[0]) {
-          setActiveHabitId(remoteHabits[0].id)
-        }
-        if (remoteBackups.length > 0) setBackups(remoteBackups)
-      } else {
-        const mergedHabits = mergeHabitLists(habits, remoteHabits)
-        const mergedStates = mergeHabitStates(habitStates, remoteHabitStates)
-        const mergedBackups = mergeDailyBackups(backups, remoteBackups, MAX_BACKUPS)
-        const earliestFirstUsed = remoteFirstUsed && remoteFirstUsed < firstUsedDate
-          ? remoteFirstUsed
-          : firstUsedDate
-
-        setHabits(mergedHabits)
-        setHabitStates(mergedStates)
-        setBackups(mergedBackups)
-        setFirstUsedDate(earliestFirstUsed)
-
-        if (!mergedHabits.some((h) => h.id === activeHabitId)) {
-          setActiveHabitId(mergedHabits[0]?.id ?? 'habit-1')
-        }
-
-        await saveUserDataToCloud(currentUser.uid, {
-          habits: mergedHabits,
-          habitStates: mergedStates,
-          firstUsedDate: earliestFirstUsed,
-          activeHabitId,
-          backups: mergedBackups,
-        })
-      }
-
-      cloudDataReadyRef.current = true
-      setSyncStatus('synced')
-      setLastSyncTime(new Date())
-    } catch (err) {
-      console.error('Failed to restore from cloud:', err)
-      setSyncStatus('error')
-    }
-  }
-
-  // Auth listener & Initial Data Migration
+  const latestCloudDataRef = useRef({ habits, habitStates, firstUsedDate, activeHabitId, backups })
   useEffect(() => {
-    const unsubscribe = subscribeToAuth((user) => {
+    latestCloudDataRef.current = { habits, habitStates, firstUsedDate, activeHabitId, backups }
+  }, [habits, habitStates, firstUsedDate, activeHabitId, backups])
+
+  const applyCloudData = (cloudData: CloudDataPayload): CloudDataPayload => {
+    const local = latestCloudDataRef.current
+    const remoteHabits = ((cloudData.habits as HabitItem[]) ?? []).filter((habit) => habit.id !== 'habit-mood')
+    const remoteHabitStates = (cloudData.habitStates as Record<string, HabitState>) ?? {}
+    const remoteBackups = (cloudData.backups as DailyBackup[]) ?? []
+    const useRemoteData = isDefaultSeedData(local.habits, local.habitStates) && remoteHabits.length > 0
+    const merged = useRemoteData
+      ? { habits: remoteHabits, habitStates: remoteHabitStates }
+      : mergeHabitData(local.habits, local.habitStates, remoteHabits, remoteHabitStates)
+    const mergedBackups = useRemoteData && remoteBackups.length > 0
+      ? remoteBackups
+      : mergeDailyBackups(local.backups, remoteBackups, MAX_BACKUPS)
+    const mergedFirstUsed = cloudData.firstUsedDate && cloudData.firstUsedDate < local.firstUsedDate
+      ? cloudData.firstUsedDate
+      : local.firstUsedDate
+    const remoteActiveHabitId = cloudData.activeHabitId
+    const mergedActiveHabitId = useRemoteData && remoteActiveHabitId
+      && merged.habits.some((habit) => habit.id === remoteActiveHabitId)
+      ? remoteActiveHabitId
+      : merged.habits.some((habit) => habit.id === local.activeHabitId)
+        ? local.activeHabitId
+        : merged.habits[0]?.id ?? 'habit-1'
+
+    if (JSON.stringify(local.habits) !== JSON.stringify(merged.habits)) setHabits(merged.habits)
+    if (JSON.stringify(local.habitStates) !== JSON.stringify(merged.habitStates)) setHabitStates(merged.habitStates)
+    if (JSON.stringify(local.backups) !== JSON.stringify(mergedBackups)) setBackups(mergedBackups)
+    if (local.firstUsedDate !== mergedFirstUsed) setFirstUsedDate(mergedFirstUsed)
+    if (local.activeHabitId !== mergedActiveHabitId) setActiveHabitId(mergedActiveHabitId)
+
+    return {
+      habits: merged.habits,
+      habitStates: merged.habitStates,
+      backups: mergedBackups,
+      firstUsedDate: mergedFirstUsed,
+      activeHabitId: mergedActiveHabitId,
+    }
+  }
+
+  // Load local data once, then keep it synchronized through Firestore snapshots.
+  useEffect(() => {
+    let active = true
+    let authRequestId = 0
+    let unsubscribeFromCloud: (() => void) | null = null
+
+    const unsubscribeFromAuth = subscribeToAuth((user) => {
+      authRequestId += 1
+      const requestId = authRequestId
+      unsubscribeFromCloud?.()
+      unsubscribeFromCloud = null
+      cloudDataReadyRef.current = false
       setCurrentUser(user)
+
       if (!user) {
-        cloudDataReadyRef.current = false
         setSyncStatus('idle')
         return
       }
@@ -617,85 +532,41 @@ function App(): JSX.Element {
       setSyncStatus('syncing')
       getUserDataFromCloud(user.uid)
         .then(async (cloudData) => {
-          if (!cloudData) {
-            // First time user: migrate existing local habits to the cloud
-            await saveUserDataToCloud(user.uid, {
-              habits,
-              habitStates,
-              firstUsedDate,
-              activeHabitId,
-              backups,
-            })
-            cloudDataReadyRef.current = true
+          if (!active || requestId !== authRequestId) return
+
+          if (cloudData) {
+            createLocalSafetySnapshot(latestCloudDataRef.current)
+            const mergedData = applyCloudData(cloudData)
+            await saveUserDataToCloud(user.uid, mergedData)
+          } else {
+            await saveUserDataToCloud(user.uid, latestCloudDataRef.current)
+          }
+
+          if (!active || requestId !== authRequestId) return
+          cloudDataReadyRef.current = true
+          unsubscribeFromCloud = subscribeToCloudUserData(user.uid, (updatedCloudData) => {
+            if (!active || requestId !== authRequestId || !updatedCloudData) return
+            applyCloudData(updatedCloudData)
             setSyncStatus('synced')
             setLastSyncTime(new Date())
-            return
-          }
-
-          // Safety net: preserve local data before applying cloud migration
-          createLocalSafetySnapshot({
-            habits,
-            habitStates,
-            firstUsedDate,
-            activeHabitId,
-            backups,
           })
-
-          const remoteHabits = (cloudData.habits as HabitItem[]) ?? []
-          const remoteHabitStates = (cloudData.habitStates as Record<string, HabitState>) ?? {}
-          const remoteBackups = (cloudData.backups as DailyBackup[]) ?? []
-          const remoteFirstUsed = cloudData.firstUsedDate
-
-          // Case A: Fresh device with untouched placeholder data -> take cloud data
-          if (isDefaultSeedData(habits, habitStates) && remoteHabits.length > 0) {
-            setHabits(remoteHabits)
-            setHabitStates(remoteHabitStates)
-            if (remoteFirstUsed) setFirstUsedDate(remoteFirstUsed)
-            if (cloudData.activeHabitId && remoteHabits.some((h) => h.id === cloudData.activeHabitId)) {
-              setActiveHabitId(cloudData.activeHabitId)
-            } else if (remoteHabits[0]) {
-              setActiveHabitId(remoteHabits[0].id)
-            }
-            if (remoteBackups.length > 0) setBackups(remoteBackups)
-          } else {
-            // Case B: Real local data exists -> merge both local and cloud intelligently
-            const mergedHabits = mergeHabitLists(habits, remoteHabits)
-            const mergedStates = mergeHabitStates(habitStates, remoteHabitStates)
-            const mergedBackups = mergeDailyBackups(backups, remoteBackups, MAX_BACKUPS)
-            const earliestFirstUsed = remoteFirstUsed && remoteFirstUsed < firstUsedDate
-              ? remoteFirstUsed
-              : firstUsedDate
-
-            setHabits(mergedHabits)
-            setHabitStates(mergedStates)
-            setBackups(mergedBackups)
-            setFirstUsedDate(earliestFirstUsed)
-
-            if (!mergedHabits.some((h) => h.id === activeHabitId)) {
-              setActiveHabitId(mergedHabits[0]?.id ?? 'habit-1')
-            }
-
-            // Write merged data to cloud
-            await saveUserDataToCloud(user.uid, {
-              habits: mergedHabits,
-              habitStates: mergedStates,
-              firstUsedDate: earliestFirstUsed,
-              activeHabitId,
-              backups: mergedBackups,
-            })
-          }
-
-          cloudDataReadyRef.current = true
           setSyncStatus('synced')
           setLastSyncTime(new Date())
         })
-        .catch((err) => {
-          console.error('Error fetching initial cloud data:', err)
+        .catch((err: unknown) => {
+          if (!active || requestId !== authRequestId) return
+          console.error('Error initializing automatic cloud sync:', err)
           setSyncStatus('error')
         })
     })
 
-    return () => unsubscribe()
+    return () => {
+      active = false
+      authRequestId += 1
+      cloudDataReadyRef.current = false
+      unsubscribeFromCloud?.()
+      unsubscribeFromAuth()
+    }
   }, [])
 
   // Auto-sync debounced changes when user is logged in
@@ -1089,6 +960,35 @@ function App(): JSX.Element {
               </button>
             ))}
           </div>
+          <div className="heatmap-wrap mood-heatmap" aria-label="Mood history heatmap">
+            <div className="heatmap-labels">
+              <span>First used {new Date(`${firstUsedDate}T12:00:00`).toLocaleDateString()}</span>
+            </div>
+            <div className="heatmap-grid">
+              {moodHistoryDays.map(({ dateKey, date, value }) => {
+                const moodLabel = value ? moodOptions.find((option) => option.value === value)?.label : null
+                const dateLabel = date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })
+                const title = `${dateLabel} — ${moodLabel ?? 'no mood recorded'}`
+                const isTooltipActive = activeHeatmapTooltip?.type === 'mood'
+                  && activeHeatmapTooltip.dateKey === dateKey
+
+                return (
+                  <button
+                    key={dateKey}
+                    type="button"
+                    className={`heat-cell ${value ? `mood-${value}` : 'mood-empty'}`}
+                    aria-label={title}
+                    aria-expanded={isTooltipActive}
+                    title={title}
+                    onClick={() => toggleHeatmapTooltip('mood', dateKey)}
+                  />
+                )
+              })}
+            </div>
+            {activeHeatmapTooltip?.type === 'mood' && activeHeatmapTooltipText && (
+              <div className="heatmap-tooltip" role="status">{activeHeatmapTooltipText}</div>
+            )}
+          </div>
         </div>
 
         <div className="tab-bar" aria-label="Habit tabs">
@@ -1121,7 +1021,7 @@ function App(): JSX.Element {
             className="tab-button add-button"
             onClick={() => {
               const newHabit = {
-                id: `habit-${Date.now()}`,
+                id: `habit-${crypto.randomUUID()}`,
                 name: '',
               }
               const initialSlipDates = recentDays.map((date) => getLocalDateKey(date))
@@ -1161,8 +1061,6 @@ function App(): JSX.Element {
             user={currentUser}
             syncStatus={syncStatus}
             lastSyncTime={lastSyncTime}
-            onSyncToCloud={syncToCloud}
-            onRestoreFromCloud={restoreFromCloud}
           />
 
           {reminderEnabled && (
@@ -1214,45 +1112,7 @@ function App(): JSX.Element {
           </button>
         </div>
 
-        {isMoodTab ? (
-          <div className="mood-panel">
-            <div className="mood-header">
-              <h1></h1>
-            </div>
-
-            <div className="heatmap-wrap mood-heatmap" aria-label="Mood history heatmap">
-              <div className="heatmap-labels">
-                <span>First used {new Date(`${firstUsedDate}T12:00:00`).toLocaleDateString()}</span>
-              </div>
-              <div className="heatmap-grid">
-                {moodHistoryDays.map(({ dateKey, date, value }) => {
-                  const moodLabel = value ? moodOptions.find((option) => option.value === value)?.label : null
-                  const dateLabel = date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })
-                  const title = `${dateLabel} — ${moodLabel ?? 'no mood recorded'}`
-                  const isTooltipActive = activeHeatmapTooltip?.type === 'mood'
-                    && activeHeatmapTooltip.dateKey === dateKey
-
-                  return (
-                    <button
-                      key={dateKey}
-                      type="button"
-                      className={`heat-cell ${value ? `mood-${value}` : 'mood-empty'}`}
-                      aria-label={title}
-                      aria-expanded={isTooltipActive}
-                      title={title}
-                      onClick={() => toggleHeatmapTooltip('mood', dateKey)}
-                    />
-                  )
-                })}
-              </div>
-              {activeHeatmapTooltip?.type === 'mood' && activeHeatmapTooltipText && (
-                <div className="heatmap-tooltip" role="status">{activeHeatmapTooltipText}</div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="habit-header">
+        <div className="habit-header">
               <h1>
                 No{' '}
                 <input
@@ -1361,8 +1221,6 @@ function App(): JSX.Element {
                 <div className="heatmap-tooltip" role="status">{activeHeatmapTooltipText}</div>
               )}
             </div>
-          </>
-        )}
       </section>
     </main>
   )

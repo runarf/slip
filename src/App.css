@@ -246,6 +246,14 @@ h1 {
   padding-top: 4px;
 }
 
+.top-mood-panel .mood-button {
+  min-height: 54px;
+}
+
+.top-mood-panel .mood-emoji {
+  font-size: 1.75rem;
+}
+
 .mood-header {
   text-align: center;
 }
@@ -926,7 +934,7 @@ h1 {
 }
 
 .mood-heatmap {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .app-shell.dark .heatmap-wrap {
