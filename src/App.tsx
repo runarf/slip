@@ -1,6 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import BackupDialog, { type DailyBackup } from './BackupDialog'
 import SyncDialog, { type SyncPayload } from './SyncDialog'
+import AuthDialog from './AuthDialog'
+import {
+  isDefaultSeedData,
+  createLocalSafetySnapshot,
+  mergeHabitLists,
+  mergeHabitStates,
+  mergeDailyBackups,
+} from './syncUtils'
+import {
+  subscribeToAuth,
+  saveUserDataToCloud,
+  getUserDataFromCloud,
+} from './firebase'
+import type { User } from 'firebase/auth'
 import './App.css'
 
 const HABIT_KEY = 'habit-tracker-habit'
@@ -119,7 +133,7 @@ function App(): JSX.Element {
     return 'habit-1'
   })
 
-  const [habitStates, setHabitStates] = useState<Record<string, HabitState>>(() => {
+  const [habitStates, setHabitStates] = useState<Record<string, HabitState>>((): Record<string, HabitState> => {
     const saved = localStorage.getItem(SLIPS_KEY)
     const initialSlipDates = getLastSevenDays().map((date) => getLocalDateKey(date))
     const fallbackState: HabitState = {
@@ -183,6 +197,10 @@ function App(): JSX.Element {
       ? savedFirstUsedDate
       : firstTrackingDate
   })
+
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error' | 'offline'>('idle')
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null)
 
   const [bursts, setBursts] = useState<Array<{ id: number; x: number; emoji: string }>>([])
   const [floatingText, setFloatingText] = useState<Array<{ id: number; x: number; text: string; tone: 'dark' | 'positive' }>>([])
@@ -495,6 +513,219 @@ function App(): JSX.Element {
     setActiveHabitId(backup.activeHabitId)
     if (backup.firstUsedDate) setFirstUsedDate(backup.firstUsedDate)
   }
+
+  const cloudDataReadyRef = useRef(false)
+
+  const syncToCloud = async (): Promise<void> => {
+    if (!currentUser) return
+    setSyncStatus('syncing')
+    try {
+      await saveUserDataToCloud(currentUser.uid, {
+        habits,
+        habitStates,
+        firstUsedDate,
+        activeHabitId,
+        backups,
+      })
+      setSyncStatus('synced')
+      setLastSyncTime(new Date())
+    } catch (err) {
+      console.error('Failed to sync to cloud:', err)
+      setSyncStatus('error')
+    }
+  }
+
+  const restoreFromCloud = async (): Promise<void> => {
+    if (!currentUser) return
+    setSyncStatus('syncing')
+    try {
+      const cloudData = await getUserDataFromCloud(currentUser.uid)
+      if (!cloudData) {
+        await syncToCloud()
+        return
+      }
+
+      // Safety net: preserve pre-restore local data
+      createLocalSafetySnapshot({
+        habits,
+        habitStates,
+        firstUsedDate,
+        activeHabitId,
+        backups,
+      })
+
+      const remoteHabits = (cloudData.habits as HabitItem[]) ?? []
+      const remoteHabitStates = (cloudData.habitStates as Record<string, HabitState>) ?? {}
+      const remoteBackups = (cloudData.backups as DailyBackup[]) ?? []
+      const remoteFirstUsed = cloudData.firstUsedDate
+
+      if (isDefaultSeedData(habits, habitStates) && remoteHabits.length > 0) {
+        setHabits(remoteHabits)
+        setHabitStates(remoteHabitStates)
+        if (remoteFirstUsed) setFirstUsedDate(remoteFirstUsed)
+        if (cloudData.activeHabitId && remoteHabits.some((h) => h.id === cloudData.activeHabitId)) {
+          setActiveHabitId(cloudData.activeHabitId)
+        } else if (remoteHabits[0]) {
+          setActiveHabitId(remoteHabits[0].id)
+        }
+        if (remoteBackups.length > 0) setBackups(remoteBackups)
+      } else {
+        const mergedHabits = mergeHabitLists(habits, remoteHabits)
+        const mergedStates = mergeHabitStates(habitStates, remoteHabitStates)
+        const mergedBackups = mergeDailyBackups(backups, remoteBackups, MAX_BACKUPS)
+        const earliestFirstUsed = remoteFirstUsed && remoteFirstUsed < firstUsedDate
+          ? remoteFirstUsed
+          : firstUsedDate
+
+        setHabits(mergedHabits)
+        setHabitStates(mergedStates)
+        setBackups(mergedBackups)
+        setFirstUsedDate(earliestFirstUsed)
+
+        if (!mergedHabits.some((h) => h.id === activeHabitId)) {
+          setActiveHabitId(mergedHabits[0]?.id ?? 'habit-1')
+        }
+
+        await saveUserDataToCloud(currentUser.uid, {
+          habits: mergedHabits,
+          habitStates: mergedStates,
+          firstUsedDate: earliestFirstUsed,
+          activeHabitId,
+          backups: mergedBackups,
+        })
+      }
+
+      cloudDataReadyRef.current = true
+      setSyncStatus('synced')
+      setLastSyncTime(new Date())
+    } catch (err) {
+      console.error('Failed to restore from cloud:', err)
+      setSyncStatus('error')
+    }
+  }
+
+  // Auth listener & Initial Data Migration
+  useEffect(() => {
+    const unsubscribe = subscribeToAuth((user) => {
+      setCurrentUser(user)
+      if (!user) {
+        cloudDataReadyRef.current = false
+        setSyncStatus('idle')
+        return
+      }
+
+      setSyncStatus('syncing')
+      getUserDataFromCloud(user.uid)
+        .then(async (cloudData) => {
+          if (!cloudData) {
+            // First time user: migrate existing local habits to the cloud
+            await saveUserDataToCloud(user.uid, {
+              habits,
+              habitStates,
+              firstUsedDate,
+              activeHabitId,
+              backups,
+            })
+            cloudDataReadyRef.current = true
+            setSyncStatus('synced')
+            setLastSyncTime(new Date())
+            return
+          }
+
+          // Safety net: preserve local data before applying cloud migration
+          createLocalSafetySnapshot({
+            habits,
+            habitStates,
+            firstUsedDate,
+            activeHabitId,
+            backups,
+          })
+
+          const remoteHabits = (cloudData.habits as HabitItem[]) ?? []
+          const remoteHabitStates = (cloudData.habitStates as Record<string, HabitState>) ?? {}
+          const remoteBackups = (cloudData.backups as DailyBackup[]) ?? []
+          const remoteFirstUsed = cloudData.firstUsedDate
+
+          // Case A: Fresh device with untouched placeholder data -> take cloud data
+          if (isDefaultSeedData(habits, habitStates) && remoteHabits.length > 0) {
+            setHabits(remoteHabits)
+            setHabitStates(remoteHabitStates)
+            if (remoteFirstUsed) setFirstUsedDate(remoteFirstUsed)
+            if (cloudData.activeHabitId && remoteHabits.some((h) => h.id === cloudData.activeHabitId)) {
+              setActiveHabitId(cloudData.activeHabitId)
+            } else if (remoteHabits[0]) {
+              setActiveHabitId(remoteHabits[0].id)
+            }
+            if (remoteBackups.length > 0) setBackups(remoteBackups)
+          } else {
+            // Case B: Real local data exists -> merge both local and cloud intelligently
+            const mergedHabits = mergeHabitLists(habits, remoteHabits)
+            const mergedStates = mergeHabitStates(habitStates, remoteHabitStates)
+            const mergedBackups = mergeDailyBackups(backups, remoteBackups, MAX_BACKUPS)
+            const earliestFirstUsed = remoteFirstUsed && remoteFirstUsed < firstUsedDate
+              ? remoteFirstUsed
+              : firstUsedDate
+
+            setHabits(mergedHabits)
+            setHabitStates(mergedStates)
+            setBackups(mergedBackups)
+            setFirstUsedDate(earliestFirstUsed)
+
+            if (!mergedHabits.some((h) => h.id === activeHabitId)) {
+              setActiveHabitId(mergedHabits[0]?.id ?? 'habit-1')
+            }
+
+            // Write merged data to cloud
+            await saveUserDataToCloud(user.uid, {
+              habits: mergedHabits,
+              habitStates: mergedStates,
+              firstUsedDate: earliestFirstUsed,
+              activeHabitId,
+              backups: mergedBackups,
+            })
+          }
+
+          cloudDataReadyRef.current = true
+          setSyncStatus('synced')
+          setLastSyncTime(new Date())
+        })
+        .catch((err) => {
+          console.error('Error fetching initial cloud data:', err)
+          setSyncStatus('error')
+        })
+    })
+
+    return () => unsubscribe()
+  }, [])
+
+  // Auto-sync debounced changes when user is logged in
+  useEffect(() => {
+    // Only auto-sync AFTER initial cloud data has been loaded and merged!
+    if (!cloudDataReadyRef.current || !currentUser) {
+      return
+    }
+
+    setSyncStatus('syncing')
+    const timer = window.setTimeout(() => {
+      saveUserDataToCloud(currentUser.uid, {
+        habits,
+        habitStates,
+        firstUsedDate,
+        activeHabitId,
+        backups,
+      })
+        .then(() => {
+          setSyncStatus('synced')
+          setLastSyncTime(new Date())
+        })
+        .catch((err) => {
+          console.error('Debounced sync failed:', err)
+          setSyncStatus('error')
+        })
+    }, 1500)
+
+    return () => window.clearTimeout(timer)
+  }, [currentUser, habits, habitStates, firstUsedDate, activeHabitId, backups])
 
   const getDayStatus = (date: Date): 'not-tracked' | 'slipped' | 'clean' => {
     const key = formatKey(date)
@@ -925,6 +1156,14 @@ function App(): JSX.Element {
           <BackupDialog backups={backups} onRestore={restoreBackup} />
 
           <SyncDialog habits={habits} habitStates={habitStates} firstUsedDate={firstUsedDate} onMerge={mergeSyncData} />
+
+          <AuthDialog
+            user={currentUser}
+            syncStatus={syncStatus}
+            lastSyncTime={lastSyncTime}
+            onSyncToCloud={syncToCloud}
+            onRestoreFromCloud={restoreFromCloud}
+          />
 
           {reminderEnabled && (
             <div
